@@ -15,7 +15,7 @@ import (
 // sapulidi's own files (plan "Global Constraints").
 var removeAllowed = []string{
 	"internal/engine/", "internal/testutil/", "internal/state/",
-	"internal/schedule/", "internal/agent/", "internal/delivery/",
+	"internal/schedule/", "internal/agent/", "internal/delivery/", "internal/install/",
 }
 
 // forbidden maps an import path to the selectors that delete files.
