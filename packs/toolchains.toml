@@ -1,0 +1,61 @@
+pack = "toolchains"
+
+# Old versions of language toolchains. Every rule keeps the active version (found without running a shell
+# function) and one more; any doubt about which version is active keeps them all. min_age is how long a
+# version directory must have been untouched.
+
+[[rule]]
+id = "nvm"
+rev = 1
+category = "toolchains"
+bucket = "optional"
+kind = "versions"
+strategy = "keep-active-and-previous"
+location = "nvm-versions"
+min_age = "30d"
+
+[[rule]]
+id = "fnm"
+rev = 1
+category = "toolchains"
+bucket = "optional"
+kind = "versions"
+strategy = "keep-active-and-previous"
+location = "fnm-versions"
+min_age = "30d"
+
+[[rule]]
+id = "volta"
+rev = 1
+category = "toolchains"
+bucket = "optional"
+kind = "versions"
+strategy = "keep-active-and-previous"
+location = "volta-tools"
+min_age = "30d"
+
+[[rule]]
+id = "pyenv"
+rev = 1
+category = "toolchains"
+bucket = "optional"
+kind = "versions"
+strategy = "keep-active-and-previous"
+location = "pyenv-versions"
+min_age = "30d"
+
+# Rustup toolchains that are not the default and not pinned by a rust-toolchain file in a root. Removed with
+# `rustup toolchain uninstall`.
+
+[[rule]]
+id = "rustup"
+rev = 1
+category = "toolchains"
+bucket = "optional"
+kind = "versions"
+strategy = "not-pinned-in-roots"
+location = "rustup-toolchains"
+min_age = "30d"
+
+# There is no rule for Go toolchains: they live inside GOMODCACHE (golang.org/toolchain@...), which sapulidi
+# never cleans automatically.

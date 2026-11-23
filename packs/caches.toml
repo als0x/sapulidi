@@ -1,0 +1,189 @@
+pack = "caches"
+
+# Global package-manager and runtime caches. Each is cleaned only by its tool's own command, as a whole, so `age`
+# does not apply: these run only in the low-disk tier, largest first, and only when the category is enabled.
+# min_age is the validator's minimum for an optional rule.
+
+[[rule]]
+id = "go-clean-cache"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "go"
+action = "clean-cache"
+min_age = "24h"
+
+[[rule]]
+id = "npm-clean-cache"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "npm"
+action = "clean-cache"
+min_age = "24h"
+
+[[rule]]
+id = "yarn-clean-cache"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "yarn"
+action = "clean-cache"
+min_age = "24h"
+
+[[rule]]
+id = "bun-clean-cache"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "bun"
+action = "clean-cache"
+min_age = "24h"
+
+[[rule]]
+id = "pip-purge"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "pip"
+action = "purge"
+min_age = "24h"
+
+[[rule]]
+id = "dotnet-clean-cache"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "dotnet"
+action = "clean-cache"
+min_age = "24h"
+
+[[rule]]
+id = "brew-cleanup"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "brew"
+action = "cleanup"
+min_age = "24h"
+
+[[rule]]
+id = "poetry-clear"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "poetry"
+action = "clear"
+min_age = "24h"
+
+[[rule]]
+id = "pipenv-clear"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "pipenv"
+action = "clear"
+min_age = "24h"
+
+[[rule]]
+id = "conda-clean"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "cache"
+tool = "conda"
+action = "clean"
+min_age = "24h"
+
+# Prunes that remove only unreferenced entries may run weekly (category mcp-runtime).
+
+[[rule]]
+id = "uv-prune"
+rev = 1
+category = "mcp-runtime"
+bucket = "optional"
+kind = "cache"
+tool = "uv"
+action = "prune"
+min_age = "24h"
+
+[[rule]]
+id = "pnpm-prune"
+rev = 1
+category = "mcp-runtime"
+bucket = "optional"
+kind = "cache"
+tool = "pnpm"
+action = "prune"
+min_age = "24h"
+
+# Report-only: no official command cleans exactly these, so they are shown and never touched.
+
+[[rule]]
+id = "npm-npx"
+rev = 1
+category = "caches"
+bucket = "never"
+kind = "path"
+location = "npm-npx"
+
+[[rule]]
+id = "gradle-caches"
+rev = 1
+category = "caches"
+bucket = "never"
+kind = "path"
+location = "gradle-caches"
+
+[[rule]]
+id = "maven-repo"
+rev = 1
+category = "caches"
+bucket = "never"
+kind = "path"
+location = "maven-repo"
+
+[[rule]]
+id = "cargo-registry"
+rev = 1
+category = "caches"
+bucket = "never"
+kind = "path"
+location = "cargo-registry"
+
+[[rule]]
+id = "cargo-git"
+rev = 1
+category = "caches"
+bucket = "never"
+kind = "path"
+location = "cargo-git"
+
+[[rule]]
+id = "deno-cache"
+rev = 1
+category = "caches"
+bucket = "never"
+kind = "path"
+location = "deno-cache"
+
+# Gradle daemon logs are plain files nobody reads after a week. Optional (not auto) because the caches
+# category is optional.
+
+[[rule]]
+id = "gradle-daemon-logs"
+rev = 1
+category = "caches"
+bucket = "optional"
+kind = "path"
+location = "gradle-daemon-logs"
+min_age = "7d"

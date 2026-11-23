@@ -1,0 +1,23 @@
+pack = "swift"
+
+# SwiftPM build output and CocoaPods dependencies.
+
+[[rule]]
+id = "swiftpm-build"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".build"]
+markers = ["Package.swift"]
+min_age = "7d"
+
+[[rule]]
+id = "pods"
+rev = 1
+category = "deps"
+bucket = "optional"
+kind = "project"
+names = ["Pods"]
+markers = ["Podfile", "Podfile.lock"]
+min_age = "30d"

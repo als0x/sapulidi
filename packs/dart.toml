@@ -1,0 +1,13 @@
+pack = "dart"
+
+# Dart and Flutter build output next to pubspec.yaml.
+
+[[rule]]
+id = "dart-build"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".dart_tool", "build"]
+markers = ["pubspec.yaml"]
+min_age = "7d"

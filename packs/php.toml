@@ -1,0 +1,14 @@
+pack = "php"
+
+# Composer dependencies. The marker is composer.lock: a vendor/ next to composer.json alone (no lock file) is kept,
+# it is often hand-made.
+
+[[rule]]
+id = "vendor"
+rev = 1
+category = "deps"
+bucket = "optional"
+kind = "project"
+names = ["vendor"]
+markers = ["composer.lock"]
+min_age = "30d"

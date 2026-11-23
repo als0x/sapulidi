@@ -1,0 +1,56 @@
+pack = "containers"
+
+# Docker, Podman and Colima. Everything here is an engine command with no path; volumes are never touched
+# (they are only reported). The tool of a rule names the engine family; the category builds the exact argv.
+# min_age is the age of an exited container for container-prune; the other rules ignore it (the idle VM has its
+# own constant).
+
+# Dangling images only, never `image prune -a`.
+
+[[rule]]
+id = "image-prune"
+rev = 1
+category = "containers"
+bucket = "optional"
+kind = "cache"
+tool = "docker"
+action = "image-prune"
+min_age = "30d"
+
+# Docker build cache older than 30 days. Podman has no verified equivalent, so it is only reported.
+
+[[rule]]
+id = "builder-prune"
+rev = 1
+category = "containers"
+bucket = "optional"
+kind = "cache"
+tool = "docker"
+action = "builder-prune"
+min_age = "30d"
+
+# Exited containers without mounts, removed one by one with `rm <id>`, never `container prune`.
+
+[[rule]]
+id = "container-prune"
+rev = 1
+category = "containers"
+bucket = "optional"
+kind = "cache"
+tool = "docker"
+action = "container-prune"
+min_age = "30d"
+
+# A running Podman machine or Colima VM with no connection, no recent container start and no build, pull or
+# compose process for two hours is stopped (macOS only). Never started again by sapulidi.
+
+[[rule]]
+id = "vm-idle"
+rev = 1
+category = "containers"
+bucket = "optional"
+kind = "cache"
+tool = "podman"
+action = "machine-stop"
+min_age = "30d"
+os = ["darwin"]

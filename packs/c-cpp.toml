@@ -1,0 +1,13 @@
+pack = "c-cpp"
+
+# CMake build trees. A build/ is proposed only when git-ignored with no tracked file, like every project rule.
+
+[[rule]]
+id = "cmake-build"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["cmake-build-*", "build"]
+markers = ["CMakeLists.txt"]
+min_age = "7d"

@@ -1,0 +1,32 @@
+{
+  "name": "sapulidi",
+  "version": "0.1.0",
+  "description": "Removes what coding agents and toolchains leave behind on macOS and Linux, safely, with nothing to install by hand.",
+  "author": {
+    "name": "Al Ambari"
+  },
+  "homepage": "https://github.com/als0x/sapulidi",
+  "repository": "https://github.com/als0x/sapulidi",
+  "license": "MIT",
+  "untested": true,
+  "keywords": [
+    "cleanup",
+    "disk",
+    "caches",
+    "worktrees",
+    "maintenance"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json",
+  "interface": {
+    "displayName": "sapulidi",
+    "shortDescription": "Clean up what coding agents and toolchains leave behind",
+    "developerName": "Al Ambari",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ]
+  }
+}

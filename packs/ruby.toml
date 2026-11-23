@@ -1,0 +1,13 @@
+pack = "ruby"
+
+# Bundler's local install directory. vendor/ is not proposed for Ruby: it is too often hand-made.
+
+[[rule]]
+id = "bundle"
+rev = 1
+category = "deps"
+bucket = "optional"
+kind = "project"
+names = [".bundle"]
+markers = ["Gemfile"]
+min_age = "30d"

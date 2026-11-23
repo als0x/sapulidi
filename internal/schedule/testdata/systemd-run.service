@@ -1,0 +1,11 @@
+[Unit]
+Description=sapulidi dev.sapulidi.run
+
+[Service]
+Type=oneshot
+ExecStart="/data/sapulidi/bin/current/sapulidi" "run" "--trigger" "schedule"
+Nice=10
+IOSchedulingClass=idle
+Environment="PATH=/usr/bin:/opt/tools/bin"
+StandardOutput=null
+StandardError=append:/state/sapulidi/schedule-run.log

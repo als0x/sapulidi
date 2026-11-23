@@ -1,0 +1,14 @@
+pack = "crash"
+
+# Heap dumps and numbered core dumps next to the project file of a common ecosystem. Only regular files
+# match. A bare file called core is not matched: it is too often a source file or a fixture.
+
+[[rule]]
+id = "dumps"
+rev = 1
+category = "crash"
+bucket = "optional"
+kind = "file"
+names = ["*.hprof", "core.[0-9]*"]
+markers = ["pom.xml", "build.gradle*", "package.json", "go.mod", "Cargo.toml", "CMakeLists.txt", "Makefile"]
+min_age = "14d"

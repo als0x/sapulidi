@@ -1,0 +1,16 @@
+pack = "dotnet"
+
+# .NET build output. A bin/ with tracked scripts is kept by the tracked-files proof.
+#
+# Accepted baseline risk of every build-output rule: an ignored, hand-made bin/ or obj/ directory next to a
+# marker cannot be told from generated output. These rules are optional and age-gated.
+
+[[rule]]
+id = "bin-obj"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["bin", "obj"]
+markers = ["*.csproj", "*.fsproj", "*.vbproj"]
+min_age = "7d"

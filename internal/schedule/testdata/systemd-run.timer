@@ -1,0 +1,10 @@
+[Unit]
+Description=sapulidi dev.sapulidi.run timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1800s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

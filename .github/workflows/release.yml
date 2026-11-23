@@ -1,0 +1,103 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the tagged commit to be on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "the tagged commit $GITHUB_SHA is not an ancestor of origin/main" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Check the Go toolchain against go.mod
+        run: |
+          want=$(sed -n 's/^toolchain go//p' go.mod)
+          got=$(go env GOVERSION)
+          if [ "go$want" != "$got" ]; then
+            echo "go is $got, go.mod toolchain line wants go$want" >&2
+            exit 1
+          fi
+
+      - name: Check the tag against the launcher and the manifests
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=${TAG#v}
+          launcher=$(sed -n 's/^SAPULIDI_VERSION=//p' bin/sapulidi)
+          if [ "$launcher" != "$version" ]; then
+            echo "tag $version differs from bin/sapulidi SAPULIDI_VERSION $launcher" >&2
+            exit 1
+          fi
+          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json .codex-plugin/plugin.json .cursor-plugin/plugin.json .antigravity-plugin/plugin.json; do
+            if ! grep -q "\"version\": \"$version\"" "$f"; then
+              echo "$f does not carry version $version" >&2
+              exit 1
+            fi
+          done
+
+      - name: Run the checks
+        run: bash tests/run.sh
+
+      - name: Build the four binaries
+        env:
+          TAG: ${{ github.ref_name }}
+          CGO_ENABLED: "0"
+          GOFLAGS: ""
+          GOAMD64: v1
+        run: |
+          version=${TAG#v}
+          mkdir dist
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
+            os=${target%/*}
+            arch=${target#*/}
+            GOOS=$os GOARCH=$arch go build -trimpath -buildvcs=false \
+              -ldflags "-s -w -X github.com/als0x/sapulidi/internal/version.Version=$version" \
+              -o "dist/sapulidi_${version}_${os}_${arch}" ./cmd/sapulidi
+          done
+          (cd dist && sha256sum sapulidi_* > checksums.txt)
+
+      - name: Check the checksums against the committed file
+        run: |
+          if ! diff -u checksums.txt dist/checksums.txt; then
+            echo "computed checksums differ from the committed checksums.txt; nothing is published" >&2
+            exit 1
+          fi
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/sapulidi_*
+            dist/checksums.txt
+
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/sapulidi_* dist/checksums.txt --title "$TAG" --verify-tag --generate-notes --draft

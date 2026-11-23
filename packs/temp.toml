@@ -1,0 +1,85 @@
+pack = "temp"
+
+# Leftovers that build and test tools write directly into the user's temp dir. There is no broad `tmp*` rule:
+# other programs share that directory.
+
+[[rule]]
+id = "go-build"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["go-build*"]
+min_age = "1h"
+
+[[rule]]
+id = "pytest"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["pytest-of-*"]
+min_age = "2h"
+
+[[rule]]
+id = "pip"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["pip-*"]
+min_age = "2h"
+
+[[rule]]
+id = "playwright"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["playwright*"]
+min_age = "2h"
+
+[[rule]]
+id = "vitest"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["vitest*"]
+min_age = "2h"
+
+[[rule]]
+id = "jest"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["jest_*"]
+min_age = "2h"
+
+[[rule]]
+id = "tsx"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["tsx-*"]
+min_age = "2h"
+
+[[rule]]
+id = "bunx"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["bunx-*"]
+min_age = "2h"
+
+[[rule]]
+id = "node-compile-cache"
+rev = 1
+category = "temp"
+bucket = "auto"
+kind = "temp"
+names = ["node-compile-cache"]
+min_age = "2h"

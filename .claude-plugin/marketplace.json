@@ -1,0 +1,12 @@
+{
+  "name": "als0x-sapulidi",
+  "owner": { "name": "Al Ambari" },
+  "plugins": [
+    {
+      "name": "sapulidi",
+      "source": "./",
+      "description": "Removes what coding agents and toolchains leave behind on macOS and Linux, safely, with nothing to install by hand.",
+      "version": "0.1.0"
+    }
+  ]
+}

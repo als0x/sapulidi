@@ -1,0 +1,28 @@
+pack = "models"
+
+# Local model stores. The bucket is never: they are measured and shown by `report`, never removed. The location
+# names the store; the category knows where it is (Ollama through `ollama list` when installed).
+
+[[rule]]
+id = "ollama"
+rev = 1
+category = "models"
+bucket = "never"
+kind = "path"
+location = "ollama"
+
+[[rule]]
+id = "lmstudio"
+rev = 1
+category = "models"
+bucket = "never"
+kind = "path"
+location = "lmstudio"
+
+[[rule]]
+id = "huggingface"
+rev = 1
+category = "models"
+bucket = "never"
+kind = "path"
+location = "huggingface"

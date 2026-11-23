@@ -1,0 +1,36 @@
+pack = "jvm"
+
+# Gradle and Maven build output, and JVM crash logs next to a project file.
+#
+# Accepted baseline risk of every build-output rule: an ignored, hand-made build/ or target/ directory next to
+# a marker cannot be told from generated output. These rules are optional and age-gated.
+
+[[rule]]
+id = "gradle-build"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["build", ".gradle"]
+markers = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+min_age = "7d"
+
+[[rule]]
+id = "maven-target"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["target"]
+markers = ["pom.xml"]
+min_age = "7d"
+
+[[rule]]
+id = "hs-err"
+rev = 1
+category = "crash"
+bucket = "optional"
+kind = "file"
+names = ["hs_err_pid*.log"]
+markers = ["pom.xml", "build.gradle*"]
+min_age = "7d"

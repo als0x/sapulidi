@@ -1,0 +1,27 @@
+pack = "worktrees"
+
+# Linked worktrees are removed only when nothing in them is unsaved (guard S9) and the user opted in.
+# Orphaned folders (their git admin entry is gone) are never removed, only reported.
+
+[[rule]]
+id = "linked"
+rev = 1
+category = "worktrees"
+bucket = "optional"
+kind = "path"
+location = "linked-worktrees"
+min_age = "30d"
+
+# Admin entries of worktrees whose folder is gone: `git worktree prune` only drops that metadata.
+# min_age is only the validator's minimum: prune has no age guard by design, because the entry is offered only
+# when its folder is gone and the directory above it is still there.
+
+[[rule]]
+id = "prune"
+rev = 1
+category = "worktree-prune"
+bucket = "auto"
+kind = "cache"
+tool = "git"
+action = "worktree-prune"
+min_age = "1h"

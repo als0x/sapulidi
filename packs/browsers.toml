@@ -1,0 +1,13 @@
+pack = "browsers"
+
+# Playwright browser builds other than the newest of each browser name.
+
+[[rule]]
+id = "playwright"
+rev = 1
+category = "browsers"
+bucket = "optional"
+kind = "versions"
+strategy = "keep-newest-per-name"
+location = "playwright-browsers"
+min_age = "30d"

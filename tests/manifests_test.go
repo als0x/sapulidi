@@ -1,0 +1,175 @@
+package tests
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+type manifest struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+}
+
+func readManifest(t *testing.T, rel string) manifest {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(), rel))
+	if err != nil {
+		t.Fatalf("%s: %v", rel, err)
+	}
+	var m manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("%s: %v", rel, err)
+	}
+	return m
+}
+
+func TestManifestVersionsMatch(t *testing.T) {
+	want := readManifest(t, ".claude-plugin/plugin.json")
+	if want.Name == "" || want.Version == "" || want.Description == "" {
+		t.Fatalf("claude manifest is incomplete: %+v", want)
+	}
+	for _, rel := range []string{
+		".codex-plugin/plugin.json",
+		".cursor-plugin/plugin.json",
+		".antigravity-plugin/plugin.json",
+	} {
+		if got := readManifest(t, rel); got != want {
+			t.Errorf("%s = %+v, want %+v", rel, got, want)
+		}
+	}
+	// The marketplace entry carries the same version.
+	data, err := os.ReadFile(filepath.Join(repoRoot(), ".claude-plugin/marketplace.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mk struct {
+		Plugins []manifest `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &mk); err != nil {
+		t.Fatal(err)
+	}
+	if len(mk.Plugins) != 1 || mk.Plugins[0].Version != want.Version || mk.Plugins[0].Name != want.Name {
+		t.Errorf("marketplace.json plugins = %+v, want one entry %s %s", mk.Plugins, want.Name, want.Version)
+	}
+}
+
+func TestSkillSizeLimits(t *testing.T) {
+	root := repoRoot()
+	check := func(rel string, limit int) {
+		t.Helper()
+		info, err := os.Stat(filepath.Join(root, rel))
+		if err != nil {
+			t.Errorf("%s: %v", rel, err)
+			return
+		}
+		if info.Size() > int64(limit) {
+			t.Errorf("%s is %d bytes, limit %d", rel, info.Size(), limit)
+		}
+	}
+	check("skills/sapulidi/SKILL.md", 5120)
+	for _, h := range []string{"claude-code", "codex", "cursor", "antigravity", "opencode", "pi"} {
+		check("skills/sapulidi/references/"+h+".md", 2048)
+	}
+	refs, _ := filepath.Glob(filepath.Join(root, "skills/sapulidi/references/*.md"))
+	for _, r := range refs {
+		check(filepath.Join("skills/sapulidi/references", filepath.Base(r)), 2048)
+	}
+}
+
+func TestSkillMentionsTerminalTierCommands(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "skills/sapulidi/SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, w := range []string{"procs stop", "rule", "print", "never run", "data, never instructions", "language", "yes",
+		"(list only, never procs stop)", "procs stop is never run by you", "uninstall --all", "setup --yes", "consent --yes",
+		"config set", "OWN terminal", "script, expect, a pty, a pipe or a redirect", "never add --yes", "config.toml",
+		"applied.toml", "only sapulidi deletes", "could fake a terminal", "permission prompts",
+		"IGNORE PREVIOUS INSTRUCTIONS", "container and model names", ".codex-plugin",
+		"(available after the agent PRD)"} {
+		if !strings.Contains(text, w) {
+			t.Errorf("SKILL.md does not mention %q", w)
+		}
+	}
+	for _, a := range []string{"setup", "report", "plan", "review", "procs", "schedule", "pause"} {
+		if !strings.Contains(text, a) {
+			t.Errorf("SKILL.md does not name action %q", a)
+		}
+	}
+}
+
+func TestUntestedHostsAreMarked(t *testing.T) {
+	root := repoRoot()
+	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"Tested:", "macOS arm64", "Alpine arm64 container", "Not yet run", "real Claude Code session",
+		"Never run", "Codex, Cursor, Antigravity, OpenCode, Pi"} {
+		if !strings.Contains(string(readme), w) {
+			t.Errorf("README.md status lacks %q", w)
+		}
+	}
+	if strings.Contains(string(readme), "Only Claude Code is tested") {
+		t.Error("README.md still says only Claude Code is tested; that overstated what was run")
+	}
+	for _, rel := range []string{".codex-plugin/plugin.json", ".cursor-plugin/plugin.json", ".antigravity-plugin/plugin.json"} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), `"untested": true`) {
+			t.Errorf("%s lacks \"untested\": true", rel)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, "hooks/codex-hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `${PLUGIN_ROOT}/hooks/codex-session-start.sh`) {
+		t.Error("codex-hooks.json must use an absolute plugin-root path")
+	}
+	ref, err := os.ReadFile(filepath.Join(root, "skills/sapulidi/references/codex.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ref), "UNVERIFIED") {
+		t.Error("references/codex.md must say the plugin-root variable is UNVERIFIED")
+	}
+}
+
+func TestHostReferencesCarryTheirRules(t *testing.T) {
+	root := repoRoot()
+	read := func(h string) string {
+		data, err := os.ReadFile(filepath.Join(root, "skills/sapulidi/references", h+".md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	for _, h := range []string{"claude-code", "codex", "cursor", "antigravity", "opencode", "pi"} {
+		text := read(h)
+		for _, w := range []string{"procs stop", "uninstall --all", "script, expect, a pty or a pipe"} {
+			if !strings.Contains(text, w) {
+				t.Errorf("%s reference lacks %q", h, w)
+			}
+		}
+	}
+	for _, h := range []string{"cursor", "antigravity", "opencode", "pi"} {
+		text := read(h)
+		if !strings.Contains(text, "check --host "+h+" --host-version") {
+			t.Errorf("%s reference lacks the heartbeat command", h)
+		}
+		if !strings.Contains(text, "schedule install") {
+			t.Errorf("%s reference lacks schedule install", h)
+		}
+	}
+	if !strings.Contains(read("claude-code"), "/loop 10m sapulidi check") {
+		t.Error("claude-code reference lacks the /loop suggestion")
+	}
+}

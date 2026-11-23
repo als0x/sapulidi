@@ -1,0 +1,23 @@
+pack = "elixir"
+
+# Mix build output and dependencies next to mix.exs.
+
+[[rule]]
+id = "mix-build"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["_build"]
+markers = ["mix.exs"]
+min_age = "7d"
+
+[[rule]]
+id = "mix-deps"
+rev = 1
+category = "deps"
+bucket = "optional"
+kind = "project"
+names = ["deps"]
+markers = ["mix.exs"]
+min_age = "30d"

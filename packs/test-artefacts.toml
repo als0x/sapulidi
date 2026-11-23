@@ -1,0 +1,13 @@
+pack = "test-artefacts"
+
+# Test and coverage output next to the project file of any common ecosystem.
+
+[[rule]]
+id = "test-output"
+rev = 1
+category = "test-artefacts"
+bucket = "auto"
+kind = "project"
+names = ["test-results", "playwright-report", "coverage", ".nyc_output", "htmlcov"]
+markers = ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle*", "*.csproj"]
+min_age = "3h"

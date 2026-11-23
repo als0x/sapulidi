@@ -1,0 +1,59 @@
+pack = "agent"
+
+# What coding agents leave per session and per version. The paths are known to the agent categories; a rule only
+# names the location and the minimum age.
+
+[[rule]]
+id = "claude-scratch"
+rev = 1
+category = "agent-scratch"
+bucket = "auto"
+kind = "path"
+location = "claude-scratch"
+min_age = "24h"
+
+[[rule]]
+id = "codex-tmp"
+rev = 1
+category = "agent-scratch"
+bucket = "auto"
+kind = "path"
+location = "codex-tmp"
+min_age = "3h"
+
+# Claude Code sweeps its own transcripts by cleanupPeriodDays; this location is report-only.
+[[rule]]
+id = "claude-transcripts"
+rev = 1
+category = "agent-transcripts"
+bucket = "optional"
+kind = "path"
+location = "claude-transcripts"
+min_age = "90d"
+
+[[rule]]
+id = "codex-sessions"
+rev = 1
+category = "agent-transcripts"
+bucket = "optional"
+kind = "path"
+location = "codex-sessions"
+min_age = "90d"
+
+[[rule]]
+id = "claude-versions"
+rev = 1
+category = "agent-versions"
+bucket = "optional"
+kind = "path"
+location = "claude-versions"
+min_age = "24h"
+
+[[rule]]
+id = "claude-plugin-cache"
+rev = 1
+category = "agent-versions"
+bucket = "optional"
+kind = "path"
+location = "claude-plugin-cache"
+min_age = "24h"

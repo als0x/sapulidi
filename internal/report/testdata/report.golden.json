@@ -1,0 +1,41 @@
+{
+  "free_bytes": 0,
+  "total_bytes": 0,
+  "categories": [
+    {
+      "category": "models",
+      "bucket": "never",
+      "enabled": false,
+      "candidates": 0,
+      "candidate_bytes": 0,
+      "kept": 0,
+      "kept_bytes": 0,
+      "kept_size_known": true
+    }
+  ],
+  "unknown": [
+    {
+      "path": "$HOME/work/repo/mystery",
+      "bytes": 1,
+      "size_known": true
+    }
+  ],
+  "personal": [
+    {
+      "path": "$HOME/Downloads",
+      "bytes": 1,
+      "size_known": true
+    }
+  ],
+  "growth": [],
+  "models": [
+    {
+      "tool": "lmstudio",
+      "name": "models",
+      "path": "$HOME/.lmstudio/models",
+      "bytes": 1,
+      "size_known": true
+    }
+  ],
+  "anomalies": []
+}

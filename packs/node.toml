@@ -1,0 +1,74 @@
+pack = "node"
+
+# Per-project Node artefacts. Each needs a package.json next to it, a git-ignored directory with no tracked file,
+# and a project untouched for the category age.
+
+[[rule]]
+id = "node-modules"
+rev = 1
+category = "deps"
+bucket = "optional"
+kind = "project"
+names = ["node_modules"]
+markers = ["package.json"]
+min_age = "30d"
+
+[[rule]]
+id = "next"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".next"]
+markers = ["package.json"]
+min_age = "7d"
+
+[[rule]]
+id = "nuxt"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".nuxt"]
+markers = ["package.json"]
+min_age = "7d"
+
+[[rule]]
+id = "turbo"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".turbo"]
+markers = ["package.json"]
+min_age = "7d"
+
+[[rule]]
+id = "parcel-cache"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".parcel-cache"]
+markers = ["package.json"]
+min_age = "7d"
+
+[[rule]]
+id = "svelte-kit"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".svelte-kit"]
+markers = ["package.json"]
+min_age = "7d"
+
+[[rule]]
+id = "dist"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["dist"]
+markers = ["package.json"]
+min_age = "7d"

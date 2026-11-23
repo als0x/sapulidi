@@ -1,0 +1,13 @@
+pack = "zig"
+
+# Zig build output next to build.zig.
+
+[[rule]]
+id = "zig-build"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = [".zig-cache", "zig-cache", "zig-out"]
+markers = ["build.zig"]
+min_age = "7d"

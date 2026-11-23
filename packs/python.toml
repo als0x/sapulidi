@@ -1,0 +1,96 @@
+pack = "python"
+
+# Per-project Python artefacts. Markers decide what counts as a Python project; a conda environment
+# (conda-meta/) is never a candidate, whatever its name.
+
+[[rule]]
+id = "pycache"
+rev = 1
+category = "test-artefacts"
+bucket = "auto"
+kind = "project"
+names = ["__pycache__"]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "*.py"]
+min_age = "3h"
+
+[[rule]]
+id = "pytest-cache"
+rev = 1
+category = "test-artefacts"
+bucket = "auto"
+kind = "project"
+names = [".pytest_cache"]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "*.py"]
+min_age = "3h"
+
+[[rule]]
+id = "mypy-cache"
+rev = 1
+category = "test-artefacts"
+bucket = "auto"
+kind = "project"
+names = [".mypy_cache"]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "*.py"]
+min_age = "3h"
+
+[[rule]]
+id = "ruff-cache"
+rev = 1
+category = "test-artefacts"
+bucket = "auto"
+kind = "project"
+names = [".ruff_cache"]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "*.py"]
+min_age = "3h"
+
+[[rule]]
+id = "hypothesis"
+rev = 1
+category = "test-artefacts"
+bucket = "auto"
+kind = "project"
+names = [".hypothesis"]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "*.py"]
+min_age = "3h"
+
+# A directory named .venv or venv is a candidate only when it holds pyvenv.cfg (the scan checks that: a
+# hand-made folder called venv is kept).
+[[rule]]
+id = "venv"
+rev = 1
+category = "deps"
+bucket = "optional"
+kind = "project"
+names = [".venv", "venv"]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "tox.ini", "noxfile.py"]
+min_age = "30d"
+
+[[rule]]
+id = "tox-nox"
+rev = 1
+category = "deps"
+bucket = "optional"
+kind = "project"
+names = [".tox", ".nox"]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "tox.ini", "noxfile.py"]
+min_age = "30d"
+
+[[rule]]
+id = "build"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["build"]
+markers = ["pyproject.toml", "setup.py"]
+min_age = "7d"
+
+[[rule]]
+id = "egg-info"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["*.egg-info"]
+markers = ["pyproject.toml", "setup.py"]
+min_age = "7d"

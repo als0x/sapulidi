@@ -1,0 +1,13 @@
+pack = "rust"
+
+# Cargo build output. A target/ without Cargo.toml next to it is kept.
+
+[[rule]]
+id = "target"
+rev = 1
+category = "build-output"
+bucket = "optional"
+kind = "project"
+names = ["target"]
+markers = ["Cargo.toml"]
+min_age = "7d"

@@ -1,0 +1,13 @@
+/sapulidi
+dist/
+.worktrees/
+.chief/
+.claude/settings.local.json
+# Internal design, plan, PRD, review, spike and scenario notes stay out of the repository.
+# The user guides docs/packs.md, docs/wsl.md and docs/known-limits.md are tracked.
+/docs/specs/
+/docs/plans/
+/docs/prd/
+/docs/reviews/
+/docs/spikes/
+/docs/scenarios/

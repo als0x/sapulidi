@@ -1,0 +1,1 @@
+Folders called bin and obj with no project file next to them.

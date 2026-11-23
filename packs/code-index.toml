@@ -1,0 +1,15 @@
+pack = "code-index"
+
+# The local code-index database of CodeGraph, inside a repository. The marker .git means "this is a repository
+# root"; a folder with this name outside a repository is kept. .serena is not here: it holds hand-written
+# memories and project.yml.
+
+[[rule]]
+id = "code-index"
+rev = 1
+category = "code-index"
+bucket = "optional"
+kind = "project"
+names = [".codegraph"]
+markers = [".git"]
+min_age = "60d"

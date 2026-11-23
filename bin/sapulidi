@@ -1,0 +1,160 @@
+#!/bin/sh
+# sapulidi launcher: fetch the pinned binary once, verify it, then run it.
+SAPULIDI_VERSION=0.1.0
+# The repo-wide no-machine-path test only allows the owner name inside this full form, so the pinned
+# SAPULIDI_REPO (owner/sapulidi) is derived from it.
+SAPULIDI_HOME=github.com/als0x/sapulidi
+SAPULIDI_REPO=${SAPULIDI_HOME#github.com/}
+
+die() {
+	code=$1
+	shift
+	echo "sapulidi: $*" >&2
+	exit "$code"
+}
+
+case "$(uname -s)" in
+Darwin) os=darwin ;;
+Linux) os=linux ;;
+*) die 1 "unsupported OS: $(uname -s)" ;;
+esac
+case "$(uname -m)" in
+arm64 | aarch64) arch=arm64 ;;
+x86_64 | amd64) arch=amd64 ;;
+*) die 1 "unsupported architecture: $(uname -m)" ;;
+esac
+
+asset="sapulidi_${SAPULIDI_VERSION}_${os}_${arch}"
+if [ -n "${SAPULIDI_DATA:-}" ]; then
+	data=$SAPULIDI_DATA
+elif [ -n "${XDG_DATA_HOME:-}" ]; then
+	data=$XDG_DATA_HOME/sapulidi
+elif [ -n "${HOME:-}" ]; then
+	data=$HOME/.local/share/sapulidi
+else
+	die 1 "HOME is empty; set HOME or SAPULIDI_DATA"
+fi
+case $data in
+/*) ;;
+*) die 1 "data directory must be an absolute path: $data" ;;
+esac
+bindir=$data/bin
+dir=$bindir/$SAPULIDI_VERSION
+bin=$dir/sapulidi
+base=${SAPULIDI_RELEASE_BASE:-https://github.com/$SAPULIDI_REPO/releases/download/v$SAPULIDI_VERSION}
+case $base in
+https://* | file://*) ;;
+*) die 3 "release base must be https://" ;;
+esac
+here=$(cd "$(dirname "$0")" && pwd)
+tmp=
+lock=$bindir/.lock
+locked=0
+
+cleanup() {
+	[ -z "$tmp" ] || rm -f "$tmp"
+	[ "$locked" != 1 ] || rmdir "$lock" 2>/dev/null
+}
+trap cleanup EXIT
+trap 'exit 3' HUP INT TERM
+
+fetch() { # url dest
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL --proto '=https,file' --proto-redir '=https' --connect-timeout 15 --max-time 300 -o "$2" "$1"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -qO "$2" --https-only -T 30 "$1"
+	else
+		return 127
+	fi
+}
+
+sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d ' ' -f 1
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | cut -d ' ' -f 1
+	else
+		return 127
+	fi
+}
+
+install_binary() {
+	umask 077
+	if [ -L "$bindir" ] || [ -L "$dir" ]; then
+		die 3 "download failed: refusing symlinked directory under $data"
+	fi
+	mkdir -p "$dir" || die 3 "download failed: cannot create $dir"
+	if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+		die 3 "need curl or wget; or download $base/$asset yourself, check it against checksums.txt, and save it as $bin (chmod 0755)"
+	fi
+	sums=$here/checksums.txt
+	[ -f "$sums" ] || sums=$here/../checksums.txt
+	want=$(awk -v a="$asset" '$2 == a { print $1; exit }' "$sums" 2>/dev/null)
+	[ -n "$want" ] || die 3 "download failed: no checksum line for $asset in checksums.txt next to $0"
+	# mktemp creates the file exclusively; without it the fixed name is removed first, so a planted
+	# symlink is never written through (the lock serialises writers).
+	tmp=$(mktemp "$dir/.download.XXXXXX" 2>/dev/null) || tmp=$dir/.download
+	rm -f "$tmp"
+	fetch "$base/$asset" "$tmp" || die 3 "download failed: $base/$asset"
+	got=$(sha256 "$tmp") || die 3 "need sha256sum or shasum to verify the download"
+	[ "$got" = "$want" ] || die 3 "checksum mismatch for $asset"
+	chmod 0755 "$tmp" && mv -f "$tmp" "$bin" || die 3 "download failed: cannot install $bin"
+	tmp=
+}
+
+# Point bin/current at the highest installed version (numeric per dot part, so 0.10.0 > 0.9.0), so it only
+# moves forward. The new link is made under a temp name and renamed over "current" with mv -h (BSD) or
+# mv -T (GNU), which is one rename(2). Where neither is available it falls back to ln -sfn, which is not
+# atomic: a reader can see no "current" for an instant. Two launchers racing both write the same highest target.
+update_current() {
+	top=$(ls "$bindir" 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+)*$' |
+		sort -t . -k1,1n -k2,2n -k3,3n -k4,4n | tail -n 1)
+	[ -n "$top" ] || return 0
+	[ -f "$bindir/$top/sapulidi" ] || return 0
+	new=$bindir/.current.$$
+	rm -f "$new"
+	if ln -s "$top" "$new" 2>/dev/null; then
+		mv -fh "$new" "$bindir/current" 2>/dev/null ||
+			mv -fT "$new" "$bindir/current" 2>/dev/null ||
+			ln -sfn "$top" "$bindir/current" 2>/dev/null
+		rm -f "$new"
+	fi
+	return 0
+}
+
+if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
+	oldumask=$(umask)
+	umask 077
+	mkdir -p "$bindir" || die 3 "download failed: cannot create $bindir"
+	umask "$oldumask"
+	waited=0
+	maxwait=${SAPULIDI_LOCK_WAIT:-700}
+	while :; do
+		if mkdir "$lock" 2>/dev/null; then
+			locked=1
+			break
+		fi
+		[ -f "$bin" ] && [ -x "$bin" ] && break
+		if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] && rmdir "$lock" 2>/dev/null; then
+			continue
+		fi
+		sleep 1
+		waited=$((waited + 1))
+		[ "$waited" -le "$maxwait" ] || die 3 "download failed: timed out waiting for $lock"
+	done
+	if [ "$locked" = 1 ]; then
+		if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
+			install_binary
+			umask "$oldumask"
+		fi
+		rmdir "$lock" 2>/dev/null
+		locked=0
+	fi
+fi
+update_current
+
+if [ "${1:-}" = "--sapulidi-path" ]; then
+	echo "$bin"
+	exit 0
+fi
+exec "$bin" "$@"

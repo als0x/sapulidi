@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.sapulidi.run</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/data/sapulidi/bin/current/sapulidi</string>
+		<string>run</string>
+		<string>--trigger</string>
+		<string>schedule</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>Nice</key>
+	<integer>10</integer>
+	<key>StandardErrorPath</key>
+	<string>/state/sapulidi/schedule-run.log</string>
+	<key>StandardOutPath</key>
+	<string>/dev/null</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/opt/tools/bin</string>
+	</dict>
+</dict>
+</plist>

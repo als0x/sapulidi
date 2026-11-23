@@ -1,0 +1,7 @@
+# A path that is a stored file is a file rule's subject: files in a first-level directory are git-ignored and
+# untracked, top-level files are tracked. A bare core file (bare/run/core) and a core directory (svc/core) are
+# not matched: nothing is reported for them.
+candidate dumps/run/core.4242
+candidate dumps/run/heap.hprof
+keep tracked/core.4242 tracked
+keep nomarker/run/heap.hprof no-marker

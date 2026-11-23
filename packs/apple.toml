@@ -1,0 +1,38 @@
+pack = "apple"
+
+# Xcode leftovers, macOS only. min_age is the age of a DerivedData project folder.
+
+[[rule]]
+id = "derived-data"
+rev = 1
+category = "apple"
+bucket = "optional"
+kind = "path"
+location = "xcode-derived-data"
+min_age = "30d"
+os = ["darwin"]
+
+# Simulators whose runtime is gone, removed by Xcode's own command.
+
+[[rule]]
+id = "simulators"
+rev = 1
+category = "apple"
+bucket = "optional"
+kind = "cache"
+tool = "xcrun"
+action = "simctl-delete-unavailable"
+min_age = "30d"
+os = ["darwin"]
+
+# Device support folders other than the newest two.
+
+[[rule]]
+id = "device-support"
+rev = 1
+category = "apple"
+bucket = "optional"
+kind = "path"
+location = "xcode-device-support"
+min_age = "30d"
+os = ["darwin"]

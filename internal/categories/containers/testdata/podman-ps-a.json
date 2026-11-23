@@ -1,0 +1,140 @@
+[
+ {
+  "AutoRemove": false,
+  "Command": [
+   "sleep",
+   "1"
+  ],
+  "CreatedAt": "2023-11-14T22:13:20Z",
+  "CIDFile": "",
+  "Exited": true,
+  "ExitedAt": 1756112000,
+  "ExitCode": 0,
+  "ExposedPorts": {},
+  "Id": "0000000000000000000000000000000000000000000000000000000000abc001",
+  "Image": "docker.io/library/example:1",
+  "ImageID": "0000000000000000000000000000000000000000000000000000000000def001",
+  "IsInfra": false,
+  "Labels": {},
+  "Mounts": [],
+  "Names": [
+   "fixture-old-nomount"
+  ],
+  "Namespaces": {},
+  "Networks": [],
+  "Pid": 0,
+  "Pod": "",
+  "PodName": "",
+  "Ports": [],
+  "Restarts": 0,
+  "Size": null,
+  "StartedAt": 1700000100,
+  "State": "exited",
+  "Status": "Exited (0) long ago",
+  "Created": 1700000000
+ },
+ {
+  "AutoRemove": false,
+  "Command": [
+   "sleep",
+   "1"
+  ],
+  "CreatedAt": "2023-11-14T22:13:20Z",
+  "CIDFile": "",
+  "Exited": true,
+  "ExitedAt": 1759827200,
+  "ExitCode": 0,
+  "ExposedPorts": {},
+  "Id": "0000000000000000000000000000000000000000000000000000000000abc002",
+  "Image": "docker.io/library/example:1",
+  "ImageID": "0000000000000000000000000000000000000000000000000000000000def002",
+  "IsInfra": false,
+  "Labels": {},
+  "Mounts": [],
+  "Names": [
+   "fixture-recent"
+  ],
+  "Namespaces": {},
+  "Networks": [],
+  "Pid": 0,
+  "Pod": "",
+  "PodName": "",
+  "Ports": [],
+  "Restarts": 0,
+  "Size": null,
+  "StartedAt": 1700000100,
+  "State": "exited",
+  "Status": "Exited (0) long ago",
+  "Created": 1700000000
+ },
+ {
+  "AutoRemove": false,
+  "Command": [
+   "sleep",
+   "1"
+  ],
+  "CreatedAt": "2023-11-14T22:13:20Z",
+  "CIDFile": "",
+  "Exited": true,
+  "ExitedAt": 1754816000,
+  "ExitCode": 0,
+  "ExposedPorts": {},
+  "Id": "0000000000000000000000000000000000000000000000000000000000abc003",
+  "Image": "docker.io/library/example:1",
+  "ImageID": "0000000000000000000000000000000000000000000000000000000000def003",
+  "IsInfra": false,
+  "Labels": {},
+  "Mounts": [
+   "/data"
+  ],
+  "Names": [
+   "fixture-old-with-mount"
+  ],
+  "Namespaces": {},
+  "Networks": [],
+  "Pid": 0,
+  "Pod": "",
+  "PodName": "",
+  "Ports": [],
+  "Restarts": 0,
+  "Size": null,
+  "StartedAt": 1700000100,
+  "State": "exited",
+  "Status": "Exited (0) long ago",
+  "Created": 1700000000
+ },
+ {
+  "AutoRemove": false,
+  "Command": [
+   "sleep",
+   "1"
+  ],
+  "CreatedAt": "2023-11-14T22:13:20Z",
+  "CIDFile": "",
+  "Exited": false,
+  "ExitedAt": 0,
+  "ExitCode": 0,
+  "ExposedPorts": {},
+  "Id": "0000000000000000000000000000000000000000000000000000000000abc004",
+  "Image": "docker.io/library/example:1",
+  "ImageID": "0000000000000000000000000000000000000000000000000000000000def004",
+  "IsInfra": false,
+  "Labels": {},
+  "Mounts": [],
+  "Names": [
+   "fixture-running"
+  ],
+  "Namespaces": {},
+  "Networks": [],
+  "Pid": 1234,
+  "Pod": "",
+  "PodName": "",
+  "Ports": [],
+  "Restarts": 0,
+  "Size": null,
+  "StartedAt": 1700000100,
+  "State": "running",
+  "Status": "Up 3 hours",
+  "Created": 1700000000
+ }
+]

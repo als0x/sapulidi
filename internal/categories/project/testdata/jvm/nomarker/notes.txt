@@ -1,0 +1,1 @@
+Folders called build, .gradle and target with no build file next to them.
