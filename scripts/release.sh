@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Prepare a release. Run by the owner, never by CI.
 # usage: scripts/release.sh <version> [--dry-run]
-# Builds the four binaries the same way the release workflow does, writes checksums.txt, runs tests/run.sh,
-# and only then bumps the version in the launcher and every manifest. It prints the commit, tag and push
-# commands; it never commits, tags or pushes. A failed run leaves the tree as it found it.
+# Builds the four binaries the same way the release workflow does, bumps the version in the launcher,
+# install.sh and every manifest, writes checksums.txt, and only then runs tests/run.sh. It prints the commit,
+# tag and push commands; it never commits, tags or pushes. A failed run leaves the tree as it found it.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -32,7 +32,7 @@ if ! [[ $version =~ $version_re ]]; then
 fi
 
 manifests=".claude-plugin/plugin.json .claude-plugin/marketplace.json .codex-plugin/plugin.json .cursor-plugin/plugin.json .antigravity-plugin/plugin.json"
-changed="bin/sapulidi checksums.txt $manifests"
+changed="bin/sapulidi install.sh checksums.txt $manifests"
 targets="darwin/arm64 darwin/amd64 linux/arm64 linux/amd64"
 mod=github.com/als0x/sapulidi
 
@@ -49,12 +49,13 @@ echo "  1. build into dist/ (CGO_ENABLED=0, GOAMD64=v1, -trimpath -buildvcs=fals
 for t in $targets; do
 	echo "       sapulidi_${version}_${t%/*}_${t#*/}"
 done
-echo "  2. run bash tests/run.sh"
-echo "  3. set SAPULIDI_VERSION=$version in bin/sapulidi and write checksums.txt"
+echo "  2. set SAPULIDI_VERSION=$version in bin/sapulidi and install.sh and write checksums.txt"
 for f in $manifests; do
-	echo "  4. set \"version\": \"$version\" in $f"
+	echo "  3. set \"version\": \"$version\" in $f"
 done
-echo "  5. print the commit, tag and push commands (not run)"
+echo "  4. check install.sh and bin/sapulidi pin the same version"
+echo "  5. run bash tests/run.sh (after the new checksums.txt is written)"
+echo "  6. print the commit, tag and push commands (not run)"
 
 dirty=$(git status --porcelain)
 want=$(sed -n 's/^toolchain go//p' go.mod)
@@ -94,8 +95,6 @@ for t in $targets; do
 	gobuild "${t%/*}" "${t#*/}" "dist/sapulidi_${version}_${t%/*}_${t#*/}"
 done
 
-bash tests/run.sh
-
 replace() { # file sed-expression
 	sed "$2" "$1" >"$1.tmp"
 	cat "$1.tmp" >"$1"
@@ -103,6 +102,7 @@ replace() { # file sed-expression
 }
 
 replace bin/sapulidi "s/^SAPULIDI_VERSION=.*/SAPULIDI_VERSION=$version/"
+replace install.sh "s/^SAPULIDI_VERSION=.*/SAPULIDI_VERSION=$version/"
 for f in $manifests; do
 	replace "$f" "s/\"version\": \"[^\"]*\"/\"version\": \"$version\"/"
 done
@@ -112,8 +112,16 @@ else
 	(cd dist && shasum -a 256 sapulidi_*) >checksums.txt
 fi
 
-# The bumped files must still agree with each other.
-go test -count=1 ./tests/
+# install.sh and the launcher must pin the same version.
+pin_launcher=$(sed -n 's/^SAPULIDI_VERSION=//p' bin/sapulidi)
+pin_install=$(sed -n 's/^SAPULIDI_VERSION=//p' install.sh)
+if [ "$pin_launcher" != "$version" ] || [ "$pin_install" != "$version" ]; then
+	echo "bin/sapulidi pins $pin_launcher and install.sh pins $pin_install, want $version" >&2
+	exit 1
+fi
+
+# The suite runs last, against the new checksums.txt and the bumped files, so main is never red after the commit.
+bash tests/run.sh
 
 echo
 echo "ready. Review the diff, then run:"

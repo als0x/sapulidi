@@ -19,6 +19,13 @@ claude-code, `.codex-plugin` is codex, `.cursor-plugin` is cursor, and so on). R
 - `review`: proposals written by the scheduled agent, `sapulidi proposals` (available after the agent PRD).
 - `procs`: orphaned processes. `schedule install|remove|status`: the OS scheduler.
 - `pause` and `resume`: stop and restart every scheduled and hook run.
+- `exclude`: `sapulidi exclude <path>` makes sapulidi never touch a path; `--list` shows them. Removing one
+  (`--remove`) is terminal tier.
+- `agents` and `--schedule`: `sapulidi --agents <name>|all` installs sapulidi into an agent tool, `sapulidi
+  --schedule 30m` installs the scheduled run (`off` removes it). Show the command and wait for the user's yes.
+
+Running `sapulidi` with no arguments in a terminal opens the TUI, and `Explicit` runs delete what a person picked.
+The TUI and `Explicit` exist only for a person in a terminal: never start either one, and use `plan` and `report`.
 
 Run `report`, `plan`, `check`, `config`, `doctor`, `roots`, `log` and `schedule status` freely, and `procs`
 (list only, never procs stop) too.
