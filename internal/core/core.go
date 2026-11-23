@@ -1,5 +1,7 @@
 package core
 
+import "time"
+
 type Bucket string
 
 const (
@@ -24,10 +26,13 @@ type Candidate struct {
 	Path     string // absolute path; for ToolCommand the directory the tool reports
 	Base     string // the allowed base Path must resolve under (spec S4)
 	Removal  Removal
-	Command  []string // ToolCommand only: argv, argv[0] a known tool id
-	Dir      string   // WorktreeRemove only: main repository dir to run git in
-	Reason   string   // plain words, shown by plan
-	Bytes    int64    // set by the engine; -1 when unknown
+	Command  []string  // ToolCommand only: argv, argv[0] a known tool id
+	Dir      string    // WorktreeRemove only: main repository dir to run git in
+	Reason   string    // plain words, shown by plan
+	Bytes    int64     // set by the engine; -1 when unknown
+	Created  time.Time // birth time of Path, set by the engine; zero = unknown
+	Updated  time.Time // newest change under Path, set by the engine; zero = unknown
+	Source   string    // "auto" | "optional-on" (set by the engine)
 }
 
 // Kept is something a category or a guard decided to keep. Why is one token:

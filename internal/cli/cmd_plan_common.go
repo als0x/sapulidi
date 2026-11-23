@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"time"
 
 	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/core"
@@ -107,6 +108,16 @@ type candidateJSON struct {
 	Path     string `json:"path"`
 	Bytes    int64  `json:"bytes"`
 	Reason   string `json:"reason"`
+	Created  string `json:"created,omitempty"` // RFC 3339 UTC; absent when unknown
+	Updated  string `json:"updated,omitempty"` // RFC 3339 UTC; absent when unknown
+	Source   string `json:"source,omitempty"`
+}
+
+func rfc3339(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 type keptJSON struct {
@@ -119,7 +130,7 @@ type keptJSON struct {
 func candidatesJSON(cs []core.Candidate) []candidateJSON {
 	out := make([]candidateJSON, 0, len(cs))
 	for _, c := range cs {
-		out = append(out, candidateJSON{c.Category, c.RuleKey, c.Path, c.Bytes, c.Reason})
+		out = append(out, candidateJSON{c.Category, c.RuleKey, c.Path, c.Bytes, c.Reason, rfc3339(c.Created), rfc3339(c.Updated), c.Source})
 	}
 	return out
 }
