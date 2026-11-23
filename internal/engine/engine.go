@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/als0x/sapulidi/internal/core"
+	"github.com/als0x/sapulidi/internal/guard"
 	"github.com/als0x/sapulidi/internal/state"
 )
 
@@ -171,43 +172,62 @@ func (r *runner) scan(cats []core.Category) {
 	for _, cat := range cats {
 		r.cats[cat.Name()] = cat
 	}
-	for _, cat := range cats {
+	for i, cat := range cats {
 		if r.stopped() {
 			return
 		}
-		name := cat.Name()
-		if len(r.opt.Only) > 0 && !contains(r.opt.Only, name) {
-			continue
-		}
-		if r.opt.Quick && slowCategories[name] {
-			continue
-		}
-		if cat.Bucket() == core.Never {
-			continue
-		}
-		if !r.env.Settings.CategoryEnabled(name) {
-			ignore := r.opt.IgnoreEnabled && len(r.opt.Paths) > 0 && contains(r.opt.Only, name) && cat.Bucket() == core.Optional
-			if !ignore {
-				continue
-			}
-		}
-		cands, kept, err := safeScan(cat, r.env)
-		if r.stopped() {
+		if !r.scanOne(cat) {
 			return
 		}
-		r.sum.Kept = append(r.sum.Kept, kept...)
-		if err != nil {
-			r.sum.Failed = append(r.sum.Failed, core.Kept{Category: name, Why: "error"})
-			r.event("scan-failed", map[string]any{"category": name, "error": err.Error()})
-			continue
-		}
-		for _, c := range cands {
-			if r.stopped() {
-				return
-			}
-			r.handle(cat, c, false)
+		if r.env.Progress != nil {
+			r.env.Progress(cat.Name(), i+1, len(cats))
 		}
 	}
+}
+
+// scanOne scans one category and handles its candidates; false means the run was stopped.
+func (r *runner) scanOne(cat core.Category) bool {
+	name := cat.Name()
+	if len(r.opt.Only) > 0 && !contains(r.opt.Only, name) {
+		return true
+	}
+	if r.opt.Quick && slowCategories[name] {
+		return true
+	}
+	if cat.Bucket() == core.Never {
+		return true
+	}
+	if !r.env.Settings.CategoryEnabled(name) {
+		ignore := r.opt.IgnoreEnabled && len(r.opt.Paths) > 0 && contains(r.opt.Only, name) && cat.Bucket() == core.Optional
+		if !ignore {
+			return true
+		}
+	}
+	cands, kept, err := safeScan(cat, r.env)
+	if r.stopped() {
+		return false
+	}
+	r.sum.Kept = append(r.sum.Kept, kept...)
+	if err != nil {
+		r.sum.Failed = append(r.sum.Failed, core.Kept{Category: name, Why: "error"})
+		r.event("scan-failed", map[string]any{"category": name, "error": err.Error()})
+		return true
+	}
+	for _, c := range cands {
+		if r.stopped() {
+			return false
+		}
+		r.handle(cat, c, false)
+	}
+	return true
+}
+
+// sourceOf says where a candidate comes from: an auto category or rule, or an enabled optional category.
+func sourceOf(cat core.Category, rule core.Rule) string {
+	if cat.Bucket() == core.Auto || rule.Bucket == core.Auto {
+		return "auto"
+	}
+	return "optional-on"
 }
 
 // handle decides what happens to one candidate. lowDisk candidates skip the Paths filter and consent gating
@@ -238,8 +258,13 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 		r.sum.Kept = append(r.sum.Kept, keptOf(c, err))
 		return
 	}
+	c.Source = sourceOf(cat, rule)
 	if !r.opt.Quick && c.Path != "" {
-		c.Bytes = sizeCtx(r.env.Ctx, c.Path)
+		m, err := guard.Measure(r.env.Ctx, c.Path)
+		c.Created = m.Born
+		if err == nil {
+			c.Bytes, c.Updated = m.Bytes, m.Newest
+		}
 	}
 	if r.stopped() {
 		r.sum.Kept = append(r.sum.Kept, core.Kept{Category: c.Category, RuleKey: c.RuleKey, Path: c.Path, Why: "budget"})

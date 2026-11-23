@@ -58,6 +58,9 @@ type Env struct {
 	Facts    FactSink
 	Ctx      context.Context // run budget; categories stop scanning when it is done
 	TempDir  string          // Platform.TempDir() resolved once per run; "" when unknown
+	// Progress, when set, is called after each category finishes scanning: done categories of total. It is
+	// called from the scanning goroutine, never concurrently.
+	Progress func(category string, done, total int)
 }
 
 // Category turns rules into candidates. Scan must not modify anything.
