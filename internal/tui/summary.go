@@ -96,7 +96,7 @@ func (e *EngineDeps) Delete(ctx context.Context, paths []string) Result {
 	}
 	cp := *env
 	cp.Ctx = ctx
-	sum, err := e.Run(&cp, engine.Options{Explicit: paths, Trigger: "tui"})
+	sum, err := e.Run(&cp, engine.Options{Explicit: paths, Trigger: "tui", Budget: scanBudget})
 	if err != nil {
 		return Result{Err: err.Error()}
 	}
@@ -134,28 +134,14 @@ func resultOf(s engine.Summary) Result {
 	return r
 }
 
-// rowsOf turns a plan into list rows. Path-less tool commands (image and builder prune) become wholesale rows that
-// cannot be selected; container candidates (`<engine>:<id>`) become one group row per engine.
+// rowsOf turns a plan into list rows. A candidate without a Path (a container, image or builder prune, a worktree
+// prune) has no identity to give the engine's Explicit list, so it becomes a dim row that cannot be selected.
 func rowsOf(s engine.Summary) []Row {
 	var rows []Row
-	groups := map[string]int{} // engine -> index in rows
 	for _, c := range s.WouldRemove {
-		switch eng, ok := containerEngine(c); {
+		switch {
 		case c.Path == "":
 			rows = append(rows, wholesaleRow(c))
-		case ok:
-			i, seen := groups[eng]
-			if !seen {
-				i = len(rows)
-				groups[eng] = i
-				rows = append(rows, Row{Path: eng + ": stopped containers", Bytes: -1, Source: sourceOf(c.Source),
-					Category: c.Category, RuleKey: c.RuleKey, Why: "stopped containers: removed together"})
-			}
-			g := &rows[i]
-			g.Members = append(g.Members, c.Path)
-			if c.Bytes >= 0 {
-				g.Bytes = max(g.Bytes, 0) + c.Bytes
-			}
 		default:
 			rows = append(rows, Row{Path: c.Path, Bytes: c.Bytes, Created: c.Created, Updated: c.Updated,
 				Source: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason})
@@ -183,23 +169,18 @@ func sourceOf(s string) string {
 	return SrcAuto
 }
 
-// containerEngine reports the engine of a container candidate whose Path is `<engine>:<id>`.
-func containerEngine(c core.Candidate) (string, bool) {
-	if c.Category != "containers" {
-		return "", false
-	}
-	eng, id, ok := strings.Cut(c.Path, ":")
-	if !ok || id == "" || (eng != "docker" && eng != "podman") {
-		return "", false
-	}
-	return eng, true
-}
+// containersReason is the dim reason of a container, image or builder prune row: the engine has no path to select.
+const containersReason = "removed by the scheduled run or by docker rm / podman rm, never from this screen"
 
 func wholesaleRow(c core.Candidate) Row {
 	cmd := strings.Join(c.Command, " ")
 	if cmd == "" {
 		cmd = c.Reason
 	}
+	block := WholesaleReason(cmd)
+	if c.Category == "containers" {
+		block = containersReason
+	}
 	return Row{Path: cmd, Bytes: c.Bytes, Source: SrcAuto, Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason,
-		Block: WholesaleReason(cmd)}
+		Block: block}
 }

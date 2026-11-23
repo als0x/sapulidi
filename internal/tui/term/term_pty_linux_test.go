@@ -208,6 +208,30 @@ func TestPTYResizeEvent(t *testing.T) {
 	}
 }
 
+// The terminal goes away under the program (the master closes; the slave read fails with EIO): the event stream
+// ends with Closed instead of hanging.
+func TestPTYMasterClosedDeliversClosed(t *testing.T) {
+	master, slave := openPTY(t)
+	setWinsize(t, master, 80, 24)
+	tm := newTerm(slave, slave)
+	if err := tm.Enter(); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Restore()
+	master.Close()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case e := <-tm.Events():
+			if e == (Closed{}) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no Closed event after the master closed")
+		}
+	}
+}
+
 func TestPTYWrite(t *testing.T) {
 	master, slave := openPTY(t)
 	setWinsize(t, master, 80, 3)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/als0x/sapulidi"
@@ -38,6 +40,9 @@ func runTUI(app *App) int {
 		},
 		Facts: func() tui.Facts { return tuiFacts(st) },
 		Exclude: func(p string) error {
+			if err := excludableTUIPath(p); err != nil {
+				return err
+			}
 			return exclude.Update(paths, func(l *exclude.List) error {
 				if _, _, err := l.Add(p, "", time.Now()); err != nil {
 					return err
@@ -54,6 +59,18 @@ func runTUI(app *App) int {
 			})
 		},
 	})
+}
+
+// excludableTUIPath refuses what is not a plain absolute path: a command text would be stored relative to the
+// working directory, and a `*` would turn the exclusion into a glob.
+func excludableTUIPath(p string) error {
+	switch {
+	case !filepath.IsAbs(p):
+		return errors.New("not an absolute path")
+	case strings.Contains(p, "*"):
+		return errors.New("a path with * would become a glob")
+	}
+	return nil
 }
 
 // runTUIWith runs the loop on deps and turns its end into an exit code.

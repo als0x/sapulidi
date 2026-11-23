@@ -100,6 +100,27 @@ func TestHeartbeatOnlyJudgesScheduledRuns(t *testing.T) {
 	}
 }
 
+// A run for Explicit paths (the terminal UI) must not garbage-collect old binaries: the user confirmed a list, and
+// the binaries were not on it.
+func TestExplicitRunDoesNotGCOldBinaries(t *testing.T) {
+	f := newFix(t)
+	f.setHeartbeat("claude-code", time.Hour)
+	bin := filepath.Join(f.home, ".local", "share", "sapulidi", "bin", "0.0.1")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Touch(t, bin, 90*24*time.Hour)
+	SetBeforeRun(heartbeatHook)
+	p := f.mk("a")
+	s := f.do(Options{Explicit: []string{p}, Trigger: "tui"}, f.cat("temp", core.Auto, f.cand(p)))
+	if s.Mode != "run" || exists(p) {
+		t.Fatalf("the picked path must be removed: %+v", s)
+	}
+	if !exists(bin) {
+		t.Fatal("an Explicit run removed an old binary directory")
+	}
+}
+
 func TestHookGCsOldBinariesOncePerDay(t *testing.T) {
 	f := newFix(t)
 	f.setHeartbeat("claude-code", time.Hour)

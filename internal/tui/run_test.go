@@ -3,14 +3,26 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/engine"
+	"github.com/als0x/sapulidi/internal/execx"
+	packsload "github.com/als0x/sapulidi/internal/packs"
+	"github.com/als0x/sapulidi/internal/testutil"
+	"github.com/als0x/sapulidi/packs"
+
+	_ "github.com/als0x/sapulidi/internal/categories/containers"
 	"github.com/als0x/sapulidi/internal/tui/term"
 )
 
@@ -22,6 +34,8 @@ type fakeTerm struct {
 	restores int
 	cols     int
 	rows     int
+	sizeErr  bool
+	hook     func(os.Signal)
 }
 
 func newFakeTerm(cols, rows int) *fakeTerm {
@@ -41,7 +55,35 @@ func (f *fakeTerm) Restore() {
 	f.restores++
 }
 
-func (f *fakeTerm) Size() (int, int, error)   { return f.cols, f.rows, nil }
+func (f *fakeTerm) Size() (int, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sizeErr {
+		return 0, 0, errors.New("no size")
+	}
+	return f.cols, f.rows, nil
+}
+
+func (f *fakeTerm) setSize(cols, rows int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cols, f.rows = cols, rows
+}
+
+// OnSignal stores the hook the way term.Term does; a test calls it like signalLoop would.
+func (f *fakeTerm) OnSignal(fn func(os.Signal)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hook = fn
+}
+
+func (f *fakeTerm) signal(s os.Signal) {
+	f.mu.Lock()
+	fn := f.hook
+	f.mu.Unlock()
+	fn(s)
+}
+
 func (f *fakeTerm) Events() <-chan term.Event { return f.events }
 func (f *fakeTerm) IsPlain() bool             { return true }
 
@@ -58,6 +100,12 @@ func (f *fakeTerm) screen() string {
 		return ""
 	}
 	return f.frames[len(f.frames)-1]
+}
+
+func (f *fakeTerm) allFrames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.frames...)
 }
 
 func (f *fakeTerm) restored() int {
@@ -270,11 +318,12 @@ func TestPathKeptByAGuardIsReported(t *testing.T) {
 
 func TestSmallWindowDisablesDelete(t *testing.T) {
 	ft, d := newFakes()
-	ft.cols, ft.rows = 70, 20
+	ft.setSize(70, 20)
 	done := start(d)
 	ft.waitFor(t, "make the window larger")
 	ft.keys(" d")
 	time.Sleep(50 * time.Millisecond)
+	ft.setSize(100, 30)
 	ft.events <- term.Resize{Cols: 100, Rows: 30}
 	ft.waitFor(t, "3 rows")
 	if strings.Contains(ft.screen(), "[x]") || strings.Contains(ft.screen(), "Delete") {
@@ -365,14 +414,13 @@ func TestNoTerminal(t *testing.T) {
 	}
 }
 
-func TestRowsOfWholesaleGroupAndKept(t *testing.T) {
+func TestRowsOfWholesaleAndKept(t *testing.T) {
 	s := engine.Summary{
 		WouldRemove: []core.Candidate{
 			{Category: "caches", RuleKey: "r@1", Path: "/c/x", Bytes: 10, Source: "optional-off", Reason: "old"},
 			{Category: "containers", RuleKey: "i@1", Command: []string{"docker", "image", "prune", "-f"}, Bytes: -1, Reason: "dangling"},
-			{Category: "containers", RuleKey: "c@1", Path: "docker:abc1", Bytes: -1},
-			{Category: "containers", RuleKey: "c@1", Path: "docker:abc2", Bytes: 5},
-			{Category: "containers", RuleKey: "c@1", Path: "podman:def3", Bytes: -1},
+			{Category: "containers", RuleKey: "c@1", Command: []string{"docker", "rm", "--", "abc1"}, Bytes: -1},
+			{Category: "worktree-prune", RuleKey: "w@1", Command: []string{"git", "worktree", "prune"}, Bytes: -1},
 		},
 		Kept: []core.Kept{
 			{Category: "caches", Path: "/c/y", Why: "open"},
@@ -391,16 +439,13 @@ func TestRowsOfWholesaleGroupAndKept(t *testing.T) {
 	if r := by["/c/x"]; r.Source != SrcOptionalOff || !r.selectable() || r.Bytes != 10 {
 		t.Fatalf("%+v", r)
 	}
-	w := by["docker image prune -f"]
-	if w.selectable() || w.Block != WholesaleReason("docker image prune -f") {
+	for _, p := range []string{"docker image prune -f", "docker rm -- abc1"} {
+		if w := by[p]; w.selectable() || w.Block != containersReason || len(w.Members) != 0 {
+			t.Fatalf("container row %q: %+v", p, w)
+		}
+	}
+	if w := by["git worktree prune"]; w.selectable() || w.Block != WholesaleReason("git worktree prune") {
 		t.Fatalf("wholesale row %+v", w)
-	}
-	g := by["docker: stopped containers"]
-	if !reflect.DeepEqual(g.Members, []string{"docker:abc1", "docker:abc2"}) || g.Bytes != 5 || !g.selectable() {
-		t.Fatalf("group %+v", g)
-	}
-	if p := by["podman: stopped containers"]; len(p.Members) != 1 || p.Bytes != -1 {
-		t.Fatalf("podman group %+v", p)
 	}
 	if r := by["/c/y"]; r.Source != SrcKept || r.selectable() {
 		t.Fatalf("%+v", r)
@@ -423,7 +468,8 @@ func TestEngineDepsDeleteUsesExplicitPathsAndTuiTrigger(t *testing.T) {
 		},
 	}
 	res := e.Delete(context.Background(), []string{"/a", "/b", "/c"})
-	if !reflect.DeepEqual(got.Explicit, []string{"/a", "/b", "/c"}) || got.Trigger != "tui" || len(got.Paths) != 0 {
+	if !reflect.DeepEqual(got.Explicit, []string{"/a", "/b", "/c"}) || got.Trigger != "tui" || len(got.Paths) != 0 ||
+		got.Budget != scanBudget {
 		t.Fatalf("options %+v", got)
 	}
 	want := Result{Freed: 7, Removed: []string{"/a"}, Kept: []KeptItem{{"/b", "open"}, {"/c", "failed"}}}
@@ -448,6 +494,284 @@ func TestEngineDepsDeleteRefusals(t *testing.T) {
 	}
 	if _, err := e.Scan(context.Background(), nil); err == nil {
 		t.Fatal("scan must fail when the env cannot be built")
+	}
+}
+
+// selectDelete selects the first row and confirms the deletion: the engine call is then in flight.
+func selectDelete(t *testing.T, ft *fakeTerm) {
+	t.Helper()
+	ft.waitFor(t, "3 rows")
+	ft.keys(" dy")
+	ft.waitFor(t, "deleting...")
+}
+
+func TestSignalDuringDeletionFinishesItBeforeExit(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP} {
+		t.Run(sig.String(), func(t *testing.T) {
+			ft, d := newFakes()
+			var finished atomic.Bool
+			started := make(chan struct{})
+			d.delete = func(paths []string) Result {
+				close(started)
+				time.Sleep(300 * time.Millisecond) // a removal that does not hurry
+				finished.Store(true)
+				return Result{Removed: paths}
+			}
+			done := start(d)
+			selectDelete(t, ft)
+			<-started
+			ft.signal(sig) // what term's signalLoop does before it restores and exits
+			if !finished.Load() {
+				t.Fatal("the hook returned while the deletion was still running")
+			}
+			if !strings.Contains(strings.Join(ft.allFrames(), "\n"), "finishing the deletion") {
+				t.Fatal("no finishing frame")
+			}
+			finish(t, done)
+			if ft.restored() != 1 {
+				t.Fatalf("restores %d", ft.restored())
+			}
+		})
+	}
+}
+
+func TestSignalWithoutDeletionReturnsAtOnce(t *testing.T) {
+	ft, d := newFakes()
+	done := start(d)
+	ft.waitFor(t, "3 rows")
+	begin := time.Now()
+	ft.signal(syscall.SIGTERM)
+	if time.Since(begin) > time.Second {
+		t.Fatal("the hook waited with nothing to wait for")
+	}
+	finish(t, done)
+	if ft.restored() != 1 {
+		t.Fatalf("restores %d", ft.restored())
+	}
+}
+
+func TestQuitDuringDeletionShowsFinishingFrameAndWaits(t *testing.T) {
+	ft, d := newFakes()
+	var finished atomic.Bool
+	started := make(chan struct{})
+	d.delete = func(paths []string) Result {
+		close(started)
+		time.Sleep(time.Second)
+		finished.Store(true)
+		return Result{Removed: paths}
+	}
+	done := start(d)
+	selectDelete(t, ft)
+	<-started
+	ft.events <- term.Key{Rune: 'c', Ctrl: true}
+	ft.waitFor(t, "finishing the deletion")
+	if finished.Load() {
+		t.Fatal("the frame came after the deletion")
+	}
+	finish(t, done)
+	if !finished.Load() {
+		t.Fatal("Run returned before the deletion finished")
+	}
+	if ft.restored() != 1 {
+		t.Fatalf("restores %d", ft.restored())
+	}
+}
+
+func TestSizeErrorKeepsDeleteOff(t *testing.T) {
+	ft, d := newFakes()
+	ft.sizeErr = true
+	done := start(d)
+	ft.waitFor(t, "/cache/a")
+	ft.keys(" d")
+	time.Sleep(100 * time.Millisecond)
+	if strings.Contains(ft.screen(), "Delete") {
+		t.Fatalf("d worked without a known size:\n%s", ft.screen())
+	}
+	ft.keys("q")
+	finish(t, done)
+	if len(d.deleted()) != 0 {
+		t.Fatalf("deleted %v", d.deleted())
+	}
+}
+
+func TestResizeIsReadAgainWhenDrawing(t *testing.T) {
+	ft, d := newFakes()
+	done := start(d)
+	ft.waitFor(t, "3 rows")
+	ft.setSize(70, 20) // the SIGWINCH event was lost: only the next key draws
+	ft.keys("j")
+	ft.waitFor(t, "make the window larger")
+	ft.keys("q")
+	finish(t, done)
+}
+
+type panicDeps struct {
+	*fakeDeps
+	scanPanic, deletePanic bool
+}
+
+func (p panicDeps) Scan(ctx context.Context, f func(string, int, int)) ([]Row, error) {
+	if p.scanPanic {
+		panic("scan boom")
+	}
+	return p.fakeDeps.Scan(ctx, f)
+}
+
+func (p panicDeps) Delete(ctx context.Context, paths []string) Result {
+	if p.deletePanic {
+		panic("delete boom")
+	}
+	return p.fakeDeps.Delete(ctx, paths)
+}
+
+func TestPanicInScanGoroutineIsReported(t *testing.T) {
+	ft, d := newFakes()
+	done := make(chan error, 1)
+	go func() { done <- Run(context.Background(), panicDeps{fakeDeps: d, scanPanic: true}) }()
+	ft.waitFor(t, "scan failed: scan boom")
+	ft.keys("q")
+	if err := finish(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if ft.restored() != 1 {
+		t.Fatalf("restores %d", ft.restored())
+	}
+}
+
+func TestPanicInDeleteGoroutineIsReported(t *testing.T) {
+	ft, d := newFakes()
+	done := make(chan error, 1)
+	go func() { done <- Run(context.Background(), panicDeps{fakeDeps: d, deletePanic: true}) }()
+	ft.waitFor(t, "3 rows")
+	ft.keys(" dy")
+	ft.waitFor(t, "deletion failed: delete boom")
+	ft.keys("qq")
+	if err := finish(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTerminalReadErrorEndsRun(t *testing.T) {
+	ft, d := newFakes()
+	done := start(d)
+	ft.waitFor(t, "3 rows")
+	ft.events <- term.Closed{}
+	if err := finish(t, done); err == nil {
+		t.Fatal("Run must return an error when the terminal is gone")
+	}
+	if ft.restored() != 1 {
+		t.Fatalf("restores %d", ft.restored())
+	}
+	// a closed events channel ends it the same way
+	ft, d = newFakes()
+	done = start(d)
+	ft.waitFor(t, "3 rows")
+	close(ft.events)
+	if err := finish(t, done); err == nil {
+		t.Fatal("closed events must be an error")
+	}
+}
+
+func TestExclusionOfANonPathIsRefused(t *testing.T) {
+	ft, d := newFakes()
+	d.rows = append(d.rows,
+		Row{Path: "docker builder prune -f", Bytes: -1, Source: SrcAuto, Block: containersReason},
+		Row{Path: "/cache/star*", Bytes: 1, Source: SrcAuto},
+		Row{Path: "relative/dir", Bytes: 1, Source: SrcAuto})
+	done := start(d)
+	ft.waitFor(t, "/cache/a")
+	// order: a, b, c (300, 200, 100), then the 1-byte rows by path (star, relative), then the unknown size
+	ft.keys("jjjx") // star*
+	ft.waitFor(t, "cannot be excluded here")
+	ft.keys("jx") // relative/dir
+	ft.waitFor(t, "nothing to exclude")
+	ft.keys("jx") // the command row
+	ft.waitFor(t, "nothing to exclude")
+	ft.keys("kkkkkx") // /cache/a: a plain absolute path
+	ft.waitFor(t, "excluded")
+	ft.keys("q")
+	finish(t, done)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !reflect.DeepEqual(d.excluded, []string{"/cache/a"}) {
+		t.Fatalf("excluded %v, want only /cache/a", d.excluded)
+	}
+}
+
+func TestContainerRowsAreNeverSelectableThroughTheRealEngine(t *testing.T) {
+	t.Setenv("SAPULIDI_TEST", "1")
+	home := testutil.TempHome(t)
+	data, err := packs.FS.ReadFile("containers.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, errs := packsload.LoadFor(fstest.MapFS{"containers.toml": {Data: data}}, "", "darwin")
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	fixture := func(name string) string {
+		b, err := os.ReadFile(filepath.Join("..", "categories", "containers", "testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	run := &testutil.FakeRunner{Paths: map[string]string{"podman": "/bin/podman", "lsof": "/bin/lsof", "ps": "/bin/ps"}}
+	run.On([]string{"podman", "system", "df"}, fixture("podman-df.json"), nil)
+	run.On([]string{"podman", "ps", "-a"}, fixture("podman-ps-a.json"), nil)
+	run.On([]string{"podman", "images"}, "sha256:aaa\n", nil)
+	run.On([]string{"podman", "machine", "list"}, fixture("podman-machine-list.json"), nil)
+	run.On([]string{"lsof"}, "", &execx.ExitError{Code: 1})
+	run.On([]string{"ps", "-axo"}, "/usr/bin/vim a.txt\n", nil)
+	build := func() (*core.Env, error) {
+		return &core.Env{
+			Exclusions: testutil.NoExclusions, Home: home, Now: time.Unix(1760000000, 0), Rules: rules,
+			Platform: &testutil.FakePlatform{OSName: "darwin", Temp: filepath.Join(home, "tmp"), Free: 1 << 30}, Run: run,
+			Settings: &testutil.FakeSettings{ConsentAll: true, Categories: map[string]bool{"containers": true}},
+			Log:      &testutil.MemLogger{}, Facts: &testutil.MemFacts{}, Ctx: context.Background(),
+		}, nil
+	}
+	ft := newFakeTerm(100, 30)
+	e := &EngineDeps{
+		Build: build, Cats: core.Categories(),
+		Run: func(*core.Env, engine.Options) (engine.Summary, error) {
+			t.Error("the engine was asked to delete")
+			return engine.Summary{}, nil
+		},
+		Open: func() (Terminal, error) { return ft, nil },
+	}
+	rows, err := e.Scan(context.Background(), func(string, int, int) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range rows {
+		if r.Category != "containers" {
+			continue
+		}
+		if r.selectable() {
+			t.Errorf("container row is selectable: %+v", r)
+		}
+		if r.Block == containersReason {
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatalf("the scan found no removable container row: %+v", rows)
+	}
+	done := make(chan error, 1)
+	go func() { done <- Run(context.Background(), e) }()
+	ft.waitFor(t, "summary")
+	ft.keys("a d") // select all, delete: nothing is selectable
+	ft.waitFor(t, "nothing selected")
+	ft.keys("q")
+	if err := finish(t, done); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range run.Calls {
+		if slices.Contains(c.Argv, "rm") || slices.Contains(c.Argv, "prune") {
+			t.Errorf("a removing command ran: %v", c.Argv)
+		}
 	}
 }
 
