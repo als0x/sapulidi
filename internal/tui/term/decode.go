@@ -22,7 +22,7 @@ const (
 	KeyDelete
 )
 
-// Event is a Key or a Resize.
+// Event is a Key, a Resize or Closed.
 type Event interface{ isEvent() }
 
 // Key is one decoded key press. A printable key has Rune set; Ctrl-letter has Ctrl set and the
@@ -36,8 +36,13 @@ type Key struct {
 // Resize reports the new terminal size.
 type Resize struct{ Cols, Rows int }
 
+// Closed is the last event of a terminal whose input is gone (the read failed or hit end of file: the tty was
+// closed under us). Nothing follows it.
+type Closed struct{}
+
 func (Key) isEvent()    {}
 func (Resize) isEvent() {}
+func (Closed) isEvent() {}
 
 const maxCSI = 32
 

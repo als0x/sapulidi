@@ -45,6 +45,20 @@ type Term struct {
 	orig    syscall.Termios
 	entered bool
 	sigs    chan os.Signal
+	sigHook func(os.Signal)
+
+	// A resize is never dropped: signalLoop stores the latest size here and kicks readLoop, which delivers it.
+	resizeMu   sync.Mutex
+	resize     *Resize
+	resizeKick chan struct{}
+}
+
+// OnSignal registers fn to run when SIGINT, SIGTERM, SIGHUP or SIGQUIT arrives, before the terminal is restored
+// and the process exits. fn may block (the caller bounds it): it is where a program finishes work in flight.
+func (t *Term) OnSignal(fn func(os.Signal)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sigHook = fn
 }
 
 // Open opens /dev/tty, or uses stdin and stdout when both are terminals. It returns ErrNoTerminal
@@ -74,6 +88,8 @@ func newTerm(in, out *os.File) *Term {
 		events: make(chan Event, 64),
 		done:   make(chan struct{}),
 		exit:   os.Exit,
+
+		resizeKick: make(chan struct{}, 1),
 	}
 }
 
@@ -242,15 +258,27 @@ func (t *Term) signalLoop(sigs <-chan os.Signal) {
 		switch s {
 		case syscall.SIGWINCH:
 			if c, r, err := t.Size(); err == nil {
+				t.resizeMu.Lock()
+				t.resize = &Resize{Cols: c, Rows: r} // only the latest size matters
+				t.resizeMu.Unlock()
 				select {
-				case t.events <- Resize{Cols: c, Rows: r}:
-				default: // a full queue already holds resizes; the view reads Size again
+				case t.resizeKick <- struct{}{}:
+				default: // a kick is already waiting and will read the latest size
 				}
 			}
 		default:
 			t.mu.Lock()
-			if !t.entered {
+			hook, entered := t.sigHook, t.entered
+			t.mu.Unlock()
+			if !entered {
 				// A normal Restore already ran; the caller is cleaning up, so drop the signal.
+				return
+			}
+			if hook != nil {
+				hook(s) // may block: work in flight is finished before the terminal goes back
+			}
+			t.mu.Lock()
+			if !t.entered {
 				t.mu.Unlock()
 				return
 			}
@@ -304,12 +332,22 @@ func (t *Term) readLoop() {
 		select {
 		case c, ok := <-chunks:
 			if !ok {
+				emit(true)
+				t.send(Closed{}) // the tty is gone: tell the caller instead of leaving it waiting
 				return
 			}
 			pending = append(pending, c...)
 			emit(false)
 		case <-timeout:
 			emit(true)
+		case <-t.resizeKick:
+			t.resizeMu.Lock()
+			r := t.resize
+			t.resize = nil
+			t.resizeMu.Unlock()
+			if r != nil {
+				t.send(*r)
+			}
 		case <-t.done:
 			return
 		}

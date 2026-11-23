@@ -35,7 +35,8 @@ func heartbeatHook(env *core.Env, st *state.Store, opt Options) string {
 		}
 		return "uninstalled"
 	}
-	if !opt.DryRun {
+	// A run for exact paths the user picked removes nothing the confirmation did not list.
+	if !opt.DryRun && len(opt.Explicit) == 0 {
 		binaryGC(env, beats, now)
 	}
 	return ""
