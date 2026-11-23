@@ -14,12 +14,22 @@ type Measurement struct {
 	Files   int       // entries that are not directories
 	Newest  time.Time // the value Newest returns
 	Born    time.Time // birth time of the path itself; zero when unknown
-	HasRepo bool      // a .git entry or a bare repository inside (the HoldsRepo rule)
+	HasRepo bool      // only set by MeasureWithRepo: a .git entry or a bare repository inside (the HoldsRepo rule)
 }
 
 // Measure walks path once, without following symlinks. A walk error is returned with what was gathered so far;
-// a cancelled ctx returns ctx.Err() the same way.
+// a cancelled ctx returns ctx.Err() the same way. It does not look for repositories (that costs two extra
+// Lstat per directory); MeasureWithRepo does.
 func Measure(ctx context.Context, path string) (Measurement, error) {
+	return measure(ctx, path, false)
+}
+
+// MeasureWithRepo is Measure that also sets HasRepo.
+func MeasureWithRepo(ctx context.Context, path string) (Measurement, error) {
+	return measure(ctx, path, true)
+}
+
+func measure(ctx context.Context, path string, repo bool) (Measurement, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -52,7 +62,7 @@ func Measure(ctx context.Context, path string) (Measurement, error) {
 				m.Newest = t
 			}
 		}
-		if !m.HasRepo && (d.Name() == ".git" || (d.IsDir() && isBareRepo(p))) {
+		if repo && !m.HasRepo && (d.Name() == ".git" || (d.IsDir() && isBareRepo(p))) {
 			m.HasRepo = true
 		}
 		return nil

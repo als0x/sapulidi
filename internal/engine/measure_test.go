@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -9,7 +12,7 @@ import (
 
 func TestEngineSetsMeasurementFields(t *testing.T) {
 	f := newFix(t)
-	p := f.mk("m1")
+	p := f.mk("m1") // old mtime (the fixture backdates it)
 	c := f.cand(p)
 	s := Plan(f.env, []core.Category{f.cat("temp", core.Auto, c)}, Options{})
 	if len(s.WouldRemove) != 1 {
@@ -25,8 +28,44 @@ func TestEngineSetsMeasurementFields(t *testing.T) {
 	if got.Updated.IsZero() || time.Since(got.Updated) < 24*time.Hour {
 		t.Fatalf("updated %v must be the old mtime", got.Updated)
 	}
+}
+
+// A directory made now has a birth time within seconds of the test start. (Not f.mk: backdating the mtime of a
+// directory also moves its birth time back on macOS.)
+func TestEngineSetsCreatedFromBirthTime(t *testing.T) {
+	f := newFix(t)
+	start := time.Now()
+	f.env.Now = start.Add(72 * time.Hour) // so the young guard lets the fresh directory through
+	p := filepath.Join(f.tmp, "fresh")
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := Plan(f.env, []core.Category{f.cat("temp", core.Auto, f.cand(p))}, Options{})
+	if len(s.WouldRemove) != 1 {
+		t.Fatalf("%+v", s)
+	}
+	got := s.WouldRemove[0]
 	if got.Created.IsZero() {
-		t.Skip("filesystem reports no birth time")
+		if runtime.GOOS == "linux" {
+			t.Skip("this filesystem reports no birth time")
+		}
+		t.Fatal("no birth time on " + runtime.GOOS)
+	}
+	if d := got.Created.Sub(start); d < -5*time.Second || d > 10*time.Second {
+		t.Fatalf("created %v is not near the test start %v", got.Created, start)
+	}
+}
+
+func TestQuickLeavesCandidateUnmeasured(t *testing.T) {
+	f := newFix(t)
+	c := f.cand(f.mk("q"))
+	s := Plan(f.env, []core.Category{f.cat("temp", core.Auto, c)}, Options{Quick: true})
+	if len(s.WouldRemove) != 1 {
+		t.Fatalf("%+v", s)
+	}
+	got := s.WouldRemove[0]
+	if got.Bytes != -1 || !got.Created.IsZero() || !got.Updated.IsZero() || got.Source != "" {
+		t.Fatalf("a quick candidate is unmeasured: %+v", got)
 	}
 }
 

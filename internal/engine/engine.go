@@ -258,12 +258,12 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 		r.sum.Kept = append(r.sum.Kept, keptOf(c, err))
 		return
 	}
-	c.Source = sourceOf(cat, rule)
 	if !r.opt.Quick && c.Path != "" {
+		c.Source = sourceOf(cat, rule)
 		m, err := guard.Measure(r.env.Ctx, c.Path)
-		c.Created = m.Born
+		c.Created, c.Updated = m.Born, m.Newest
 		if err == nil {
-			c.Bytes, c.Updated = m.Bytes, m.Newest
+			c.Bytes = m.Bytes
 		}
 	}
 	if r.stopped() {
