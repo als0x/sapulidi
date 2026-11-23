@@ -84,7 +84,7 @@ func Decode(b []byte, final bool) (keys []Key, n int) {
 				continue
 			}
 			ru, size := utf8.DecodeRune(b[n:])
-			if ru != utf8.RuneError {
+			if ru != utf8.RuneError || size > 1 { // size 1 is an invalid byte; a real U+FFFD has size 3
 				keys = append(keys, Key{Rune: ru})
 			}
 			n += size

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ const (
 	tiocsptlck = 0x40045431
 	tiocswinsz = 0x5414
 )
+
+type winsize struct{ Row, Col, X, Y uint16 }
 
 // openPTY returns both ends of a fresh pseudo-terminal, without any dependency.
 func openPTY(t *testing.T) (master, slave *os.File) {
@@ -44,6 +47,55 @@ func openPTY(t *testing.T) (master, slave *os.File) {
 	return m, s
 }
 
+func setWinsize(t *testing.T, master *os.File, cols, rows int) {
+	t.Helper()
+	ws := winsize{Row: uint16(rows), Col: uint16(cols)}
+	if err := ioctl(master.Fd(), tiocswinsz, unsafe.Pointer(&ws)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// capture collects everything the terminal under test writes, read from the master in a goroutine
+// (the master is blocking, so a read deadline is not available).
+type capture struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func startCapture(master *os.File) *capture {
+	c := &capture{}
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, err := master.Read(buf)
+			c.mu.Lock()
+			c.b.Write(buf[:n])
+			c.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return c
+}
+
+func (c *capture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.b.String()
+}
+
+func (c *capture) waitFor(t *testing.T, sub string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(c.String(), sub) {
+		if time.Now().After(deadline) {
+			t.Fatalf("output %q never contained %q", c.String(), sub)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func mustTermios(t *testing.T, f *os.File) syscall.Termios {
 	t.Helper()
 	tm, err := getTermios(f)
@@ -66,6 +118,7 @@ func nextEvent(t *testing.T, tm *Term) Event {
 
 func TestPTYEnterRestore(t *testing.T) {
 	master, slave := openPTY(t)
+	out := startCapture(master)
 	orig := mustTermios(t, slave)
 	tm := newTerm(slave, slave)
 
@@ -76,34 +129,43 @@ func TestPTYEnterRestore(t *testing.T) {
 	if raw.Lflag&(syscall.ICANON|syscall.ECHO|syscall.ISIG) != 0 {
 		t.Fatalf("slave is not raw after Enter: lflag=%#x", raw.Lflag)
 	}
+	out.waitFor(t, enterSeq)
 	tm.Restore()
 	tm.Restore() // idempotent
 	if got := mustTermios(t, slave); got != orig {
 		t.Fatalf("termios after Restore differs from the original:\n got %+v\nwant %+v", got, orig)
 	}
+	out.waitFor(t, restoreSeq)
+	if n := strings.Count(out.String(), restoreSeq); n != 1 {
+		t.Fatalf("restore sequence written %d times, want 1", n)
+	}
+}
 
-	if master.SetReadDeadline(time.Now().Add(time.Second)) == nil {
-		var seen strings.Builder
-		buf := make([]byte, 256)
-		for !strings.Contains(seen.String(), restoreSeq) {
-			n, err := master.Read(buf)
-			seen.Write(buf[:n])
-			if err != nil {
-				break
-			}
-		}
-		if !strings.Contains(seen.String(), enterSeq) || !strings.Contains(seen.String(), restoreSeq) {
-			t.Fatalf("screen sequences missing from output %q", seen.String())
-		}
+func TestPTYEnterTwiceAndAfterRestore(t *testing.T) {
+	_, slave := openPTY(t)
+	orig := mustTermios(t, slave)
+	tm := newTerm(slave, slave)
+	if err := tm.Enter(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tm.Enter(); err != nil {
+		t.Fatalf("second Enter should do nothing, got %v", err)
+	}
+	tm.Restore()
+	if got := mustTermios(t, slave); got != orig {
+		t.Fatalf("one Restore after two Enters did not restore the original mode")
+	}
+	if err := tm.Enter(); err == nil {
+		t.Fatal("Enter after Restore must fail")
+	}
+	if got := mustTermios(t, slave); got != orig {
+		t.Fatal("failed Enter changed the terminal")
 	}
 }
 
 func TestPTYKeysAndSize(t *testing.T) {
 	master, slave := openPTY(t)
-	ws := struct{ Row, Col, X, Y uint16 }{Row: 24, Col: 80}
-	if err := ioctl(master.Fd(), tiocswinsz, unsafe.Pointer(&ws)); err != nil {
-		t.Fatal(err)
-	}
+	setWinsize(t, master, 80, 24)
 	tm := newTerm(slave, slave)
 	if cols, rows, err := tm.Size(); err != nil || cols != 80 || rows != 24 {
 		t.Fatalf("Size = %d, %d, %v; want 80, 24", cols, rows, err)
@@ -126,6 +188,45 @@ func TestPTYKeysAndSize(t *testing.T) {
 	}
 	if got := nextEvent(t, tm); got != (Key{Special: KeyEsc}) {
 		t.Fatalf("lone ESC gave %v", got)
+	}
+}
+
+func TestPTYResizeEvent(t *testing.T) {
+	master, slave := openPTY(t)
+	setWinsize(t, master, 80, 24)
+	tm := newTerm(slave, slave)
+	if err := tm.Enter(); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Restore()
+	setWinsize(t, master, 100, 30)
+	if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
+		t.Fatal(err)
+	}
+	if got := nextEvent(t, tm); got != (Resize{Cols: 100, Rows: 30}) {
+		t.Fatalf("event = %v, want Resize{100 30}", got)
+	}
+}
+
+func TestPTYWrite(t *testing.T) {
+	master, slave := openPTY(t)
+	setWinsize(t, master, 80, 3)
+	out := startCapture(master)
+	tm := newTerm(slave, slave)
+	if err := tm.Enter(); err != nil {
+		t.Fatal(err)
+	}
+	tm.Write([]string{"L1", "L2", "L3", "L4", "L5"})
+	out.waitFor(t, "\x1b[J") // end of the frame
+	if got := out.String(); !strings.Contains(got, "L3") || strings.Contains(got, "L4") {
+		t.Fatalf("frame must be cut to 3 rows: %q", got)
+	}
+	tm.Restore()
+	out.waitFor(t, restoreSeq)
+	tm.Write([]string{"AFTER"})
+	time.Sleep(100 * time.Millisecond)
+	if strings.Contains(out.String(), "AFTER") {
+		t.Fatal("Write after Restore drew on the main screen")
 	}
 }
 
@@ -152,7 +253,7 @@ func TestChildHelper(t *testing.T) {
 	switch mode {
 	case "panic":
 		_ = tm.Run(func() error { panic("boom") })
-	case "hup":
+	case "wait":
 		if err := tm.Enter(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(3)
@@ -171,8 +272,7 @@ func childCmd(mode string, slave *os.File) *exec.Cmd {
 }
 
 func exitCode(err error) int {
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		return ee.ExitCode()
 	}
 	return -1
@@ -190,41 +290,45 @@ func TestPTYPanicRestores(t *testing.T) {
 	}
 }
 
-func TestPTYSighupRestores(t *testing.T) {
-	_, slave := openPTY(t)
-	orig := mustTermios(t, slave)
-	cmd := childCmd("hup", slave)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	ready := false
-	sc := bufio.NewScanner(stdout)
-	for sc.Scan() {
-		if sc.Text() == "READY" {
-			ready = true
-			break
-		}
-	}
-	if !ready {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		t.Fatal("child never became ready")
-	}
-	if raw := mustTermios(t, slave); raw.Lflag&syscall.ICANON != 0 {
-		t.Fatal("child did not enter raw mode")
-	}
-	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
-		t.Fatal(err)
-	}
-	err = cmd.Wait()
-	if exitCode(err) != 128+int(syscall.SIGHUP) {
-		t.Fatalf("exit code = %d (%v), want %d", exitCode(err), err, 128+int(syscall.SIGHUP))
-	}
-	if got := mustTermios(t, slave); got != orig {
-		t.Fatalf("terminal not restored after SIGHUP:\n got %+v\nwant %+v", got, orig)
+func TestPTYSignalsRestoreAndExit(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT} {
+		t.Run(sig.String(), func(t *testing.T) {
+			_, slave := openPTY(t)
+			orig := mustTermios(t, slave)
+			cmd := childCmd("wait", slave)
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			ready := false
+			sc := bufio.NewScanner(stdout)
+			for sc.Scan() {
+				if sc.Text() == "READY" {
+					ready = true
+					break
+				}
+			}
+			if !ready {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+				t.Fatalf("child never became ready (scan error: %v)", sc.Err())
+			}
+			if raw := mustTermios(t, slave); raw.Lflag&syscall.ICANON != 0 {
+				t.Fatal("child did not enter raw mode")
+			}
+			if err := cmd.Process.Signal(sig); err != nil {
+				t.Fatal(err)
+			}
+			err = cmd.Wait()
+			if want := 128 + int(sig); exitCode(err) != want {
+				t.Fatalf("exit code = %d (%v), want %d", exitCode(err), err, want)
+			}
+			if got := mustTermios(t, slave); got != orig {
+				t.Fatalf("terminal not restored after %v:\n got %+v\nwant %+v", sig, got, orig)
+			}
+		})
 	}
 }

@@ -1,5 +1,12 @@
 // Package term is the thin OS-specific layer under the TUI: raw mode, alternate screen, size,
 // signals and key decoding. It holds no TUI logic.
+//
+// Restore runs on normal return, on a panic in the goroutine that called Run, and on SIGINT,
+// SIGTERM, SIGHUP and SIGQUIT. A panic in any other goroutine kills the process without passing
+// through Run: that goroutine must recover, or call Restore itself, before it re-panics.
+//
+// Limit: the input reader goroutine blocks in Read and cannot be cancelled, so it may swallow one
+// byte of input after Restore. The terminal's stdin must not be reused after Restore.
 package term
 
 import (
@@ -20,8 +27,8 @@ var ErrNoTerminal = errors.New("term: no terminal available")
 const (
 	escTimeout = 50 * time.Millisecond
 
-	enterSeq   = "\x1b[?1049h\x1b[?25l" // alternate screen, hide cursor
-	restoreSeq = "\x1b[?25h\x1b[?1049l" // show cursor, main screen
+	enterSeq   = "\x1b[?1049h\x1b[?25l\x1b[?7l" // alternate screen, hide cursor, autowrap off
+	restoreSeq = "\x1b[?7h\x1b[?25h\x1b[?1049l" // autowrap on, show cursor, main screen
 )
 
 // Term is a terminal in or out of raw mode. Plain is true when the view must not use colour
@@ -109,6 +116,11 @@ func (t *Term) Enter() error {
 	if err != nil {
 		return fmt.Errorf("term: read terminal mode: %w", err)
 	}
+	// Signals are caught before the terminal changes, so none can kill the process while it is raw.
+	// They wait in the buffer (and signalLoop in t.mu) until Enter returns.
+	sigs := make(chan os.Signal, 4)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)
+	t.sigs = sigs
 	raw := orig
 	raw.Iflag &^= syscall.IGNBRK | syscall.BRKINT | syscall.PARMRK | syscall.ISTRIP |
 		syscall.INLCR | syscall.IGNCR | syscall.ICRNL | syscall.IXON
@@ -119,6 +131,8 @@ func (t *Term) Enter() error {
 	raw.Cc[syscall.VMIN] = 1
 	raw.Cc[syscall.VTIME] = 0
 	if err := setTermios(t.in, &raw); err != nil {
+		signal.Stop(sigs)
+		t.sigs = nil
 		return fmt.Errorf("term: enter raw mode: %w", err)
 	}
 	t.orig = orig
@@ -127,9 +141,7 @@ func (t *Term) Enter() error {
 		t.restoreLocked()
 		return fmt.Errorf("term: write: %w", err)
 	}
-	t.sigs = make(chan os.Signal, 4)
-	signal.Notify(t.sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGWINCH)
-	go t.signalLoop(t.sigs)
+	go t.signalLoop(sigs)
 	go t.readLoop()
 	return nil
 }
@@ -193,7 +205,18 @@ func (t *Term) Events() <-chan Event { return t.events }
 
 // Write draws a full frame: cursor home, every line cleared to its end, the rest of the screen
 // cleared, no scrolling. The caller keeps each line within the terminal width.
+//
+// Write does nothing unless the terminal is entered, and lines beyond the current row count are
+// cut so a frame never scrolls.
 func (t *Term) Write(lines []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.entered {
+		return
+	}
+	if _, rows, err := t.Size(); err == nil && len(lines) > rows {
+		lines = lines[:rows]
+	}
 	var b strings.Builder
 	b.WriteString("\x1b[H")
 	for i, l := range lines {
@@ -225,7 +248,14 @@ func (t *Term) signalLoop(sigs <-chan os.Signal) {
 				}
 			}
 		default:
-			t.Restore()
+			t.mu.Lock()
+			if !t.entered {
+				// A normal Restore already ran; the caller is cleaning up, so drop the signal.
+				t.mu.Unlock()
+				return
+			}
+			t.restoreLocked()
+			t.mu.Unlock()
 			code := 128
 			if n, ok := s.(syscall.Signal); ok {
 				code += int(n)

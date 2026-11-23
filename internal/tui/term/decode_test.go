@@ -26,6 +26,7 @@ func TestDecode(t *testing.T) {
 		{"ctrl-c", "\x03", false, []Key{{Rune: 'c', Ctrl: true}}, 1},
 		{"ctrl-u", "\x15", false, []Key{{Rune: 'u', Ctrl: true}}, 1},
 		{"utf8", "é世", false, []Key{r('é'), r('世')}, 5},
+		{"real U+FFFD is a key", "\xef\xbf\xbd", false, []Key{r('�')}, 3},
 		{"partial utf8 waits", "\xc3", false, nil, 0},
 		{"partial utf8 dropped at final", "\xc3", true, nil, 1},
 		{"lone esc waits", "\x1b", false, nil, 0},
