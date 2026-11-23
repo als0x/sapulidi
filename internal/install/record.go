@@ -22,6 +22,9 @@ type Entry struct {
 	Version string    `json:"version"`
 	Time    string    `json:"time"`
 	Files   []FileRec `json:"files"`
+	// Claude only: which host steps sapulidi itself ran. Removal undoes exactly these.
+	AddedMarketplace bool `json:"added_marketplace,omitempty"`
+	InstalledPlugin  bool `json:"installed_plugin,omitempty"`
 }
 
 // Record is <data>/agents.json: removal touches only what is listed here.

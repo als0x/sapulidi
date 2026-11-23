@@ -3,16 +3,12 @@ package sapulidi
 import (
 	"encoding/json"
 	"io/fs"
+	"os"
 	"testing"
-
-	"github.com/als0x/sapulidi/internal/version"
 )
 
-func TestEmbeddedPluginManifest(t *testing.T) {
-	b, err := fs.ReadFile(Plugin, ".claude-plugin/plugin.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+func pluginVersion(t *testing.T, b []byte) string {
+	t.Helper()
 	var m struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
@@ -23,10 +19,22 @@ func TestEmbeddedPluginManifest(t *testing.T) {
 	if m.Name != "sapulidi" || m.Version == "" {
 		t.Fatalf("manifest %+v", m)
 	}
-	// A plain `go test` build carries the dev placeholder (release builds set it with ldflags), so the
-	// equality is checked only for a stamped version.
-	if version.Version != "0.0.0-dev" && m.Version != version.Version {
-		t.Fatalf("plugin version %q, binary version %q", m.Version, version.Version)
+	return m.Version
+}
+
+// The embedded manifest is the one in the repository. (internal/version holds a dev placeholder in a plain
+// build and is stamped only by the release build, so it cannot be compared here.)
+func TestEmbeddedPluginManifestMatchesRepository(t *testing.T) {
+	emb, err := fs.ReadFile(Plugin, ".claude-plugin/plugin.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disk, err := os.ReadFile(".claude-plugin/plugin.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := pluginVersion(t, emb), pluginVersion(t, disk); a != b {
+		t.Fatalf("embedded version %q, repository version %q", a, b)
 	}
 }
 

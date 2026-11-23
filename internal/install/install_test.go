@@ -42,16 +42,29 @@ func fakeClaude(t *testing.T, list string) string {
 	dir := t.TempDir()
 	state := t.TempDir()
 	logPath := filepath.Join(state, "log")
-	listPath := filepath.Join(state, "list.json")
-	if err := os.WriteFile(listPath, []byte(list), 0o644); err != nil {
-		t.Fatal(err)
+	for name, body := range map[string]string{"list.json": list, "mlist.json": "[]", "fail": ""} {
+		if err := os.WriteFile(filepath.Join(state, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	script := "#!/bin/sh\necho \"$@\" >> '" + logPath + "'\nif [ \"$1\" = plugin ] && [ \"$2\" = list ]; then cat '" + listPath + "'; fi\n"
+	// "fail" holds argv prefixes that exit 1; list.json and mlist.json answer the two list commands.
+	script := "#!/bin/sh\nd='" + state + "'\necho \"$@\" >> \"$d/log\"\n" +
+		"while read -r p; do [ -n \"$p\" ] && case \"$*\" in \"$p\"*) echo boom >&2; exit 1;; esac; done < \"$d/fail\"\n" +
+		"[ \"$*\" = 'plugin list --json' ] && cat \"$d/list.json\"\n" +
+		"[ \"$*\" = 'plugin marketplace list --json' ] && cat \"$d/mlist.json\"\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+":/usr/bin:/bin")
 	return logPath
+}
+
+// setFake rewrites one state file of the fake claude next to logp.
+func setFake(t *testing.T, logp, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(filepath.Dir(logp), name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func noTools(t *testing.T) {
@@ -78,7 +91,7 @@ func TestClaudeInstallRunsExpectedCommands(t *testing.T) {
 		t.Fatalf("got %+v %v", r, err)
 	}
 	plug := filepath.Join(e.Data, "plugin")
-	want := []string{"plugin list --json", "plugin marketplace add " + plug, "plugin install sapulidi@als0x-sapulidi"}
+	want := []string{"plugin list --json", "plugin marketplace list --json", "plugin marketplace add " + plug, "plugin install sapulidi@als0x-sapulidi"}
 	if got := readLog(t, logp); !eq(got, want) {
 		t.Fatalf("commands %q want %q", got, want)
 	}
@@ -128,7 +141,13 @@ func TestClaudeOtherSourceRefuses(t *testing.T) {
 
 func TestClaudeUpgradeReinstallsWhenVersionsDiffer(t *testing.T) {
 	e, _ := newEnv(t)
-	logp := fakeClaude(t, `[{"id":"sapulidi@als0x-sapulidi","version":"0.0.9"}]`)
+	logp := fakeClaude(t, `[]`)
+	if r, _ := e.Install("claude"); r[0].Status != "installed" {
+		t.Fatalf("got %+v", r)
+	}
+	// sapulidi installed it, then the installed version falls behind the embedded one
+	setFake(t, logp, "list.json", `[{"id":"sapulidi@als0x-sapulidi","version":"0.0.9"}]`)
+	setFake(t, logp, "log", "")
 	r, _ := e.Install("claude")
 	if r[0].Status != "upgraded" {
 		t.Fatalf("got %+v", r)
@@ -399,7 +418,7 @@ func TestRemoveRecordedRefusesRootOutsideAllowed(t *testing.T) {
 	// a skills-looking folder that is not under a host skills folder
 	odd := filepath.Join(home, "elsewhere", "sapulidi")
 	write(t, filepath.Join(odd, "a.txt"), "a")
-	removeRecorded(e.Data, home, Entry{Root: odd, Files: []FileRec{{Path: "a.txt", SHA256: sum("a")}}})
+	removeRecorded(e.Data, home, Entry{Host: "codex", Root: odd, Files: []FileRec{{Path: "a.txt", SHA256: sum("a")}}})
 	if !exists(filepath.Join(odd, "a.txt")) {
 		t.Fatal("removed under a folder that is no host skills folder")
 	}
@@ -407,7 +426,7 @@ func TestRemoveRecordedRefusesRootOutsideAllowed(t *testing.T) {
 	plug := filepath.Join(e.Data, "plugin")
 	write(t, filepath.Join(plug, "keep"), "k")
 	write(t, filepath.Join(e.Data, "agents.json"), "x")
-	removeRecorded(e.Data, home, Entry{Root: plug, Files: []FileRec{{Path: "../agents.json", SHA256: sum("x")}}})
+	removeRecorded(e.Data, home, Entry{Host: "claude", Root: plug, Files: []FileRec{{Path: "../agents.json", SHA256: sum("x")}}})
 	if !exists(filepath.Join(e.Data, "agents.json")) {
 		t.Fatal("followed .. out of the root")
 	}
@@ -427,7 +446,7 @@ func TestRemoveRecordedNeverFollowsSymlinks(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(plug, "dir")); err != nil {
 		t.Fatal(err)
 	}
-	_, notes := removeRecorded(e.Data, home, Entry{Root: plug, Files: []FileRec{
+	_, notes := removeRecorded(e.Data, home, Entry{Host: "claude", Root: plug, Files: []FileRec{
 		{Path: "link", SHA256: sum("x")}, {Path: "dir/x", SHA256: sum("x")}}})
 	if !exists(filepath.Join(outside, "x")) || !exists(filepath.Join(plug, "link")) || len(notes) < 2 {
 		t.Fatalf("followed a symlink: %v", notes)
@@ -442,7 +461,7 @@ func TestRemoveRecordedNeverFollowsSymlinks(t *testing.T) {
 	if err := os.Symlink(real, filepath.Join(e2, "plugin")); err != nil {
 		t.Fatal(err)
 	}
-	removeRecorded(e2, home, Entry{Root: filepath.Join(e2, "plugin"), Files: []FileRec{{Path: "a", SHA256: sum("a")}}})
+	removeRecorded(e2, home, Entry{Host: "claude", Root: filepath.Join(e2, "plugin"), Files: []FileRec{{Path: "a", SHA256: sum("a")}}})
 	if !exists(filepath.Join(real, "a")) {
 		t.Fatal("removed through a symlinked root")
 	}
@@ -453,7 +472,7 @@ func TestRemoveRecordedKeepsEditedFile(t *testing.T) {
 	plug := filepath.Join(e.Data, "plugin")
 	write(t, filepath.Join(plug, "a"), "edited")
 	write(t, filepath.Join(plug, "b"), "b")
-	n, notes := removeRecorded(e.Data, home, Entry{Root: plug, Files: []FileRec{{Path: "a", SHA256: sum("original")}, {Path: "b", SHA256: sum("b")}}})
+	n, notes := removeRecorded(e.Data, home, Entry{Host: "claude", Root: plug, Files: []FileRec{{Path: "a", SHA256: sum("original")}, {Path: "b", SHA256: sum("b")}}})
 	if n != 1 || !exists(filepath.Join(plug, "a")) || exists(filepath.Join(plug, "b")) {
 		t.Fatalf("removed %d, notes %v", n, notes)
 	}
@@ -467,7 +486,7 @@ func TestRemoveRecordedKeepsFolderWithUnrecordedFile(t *testing.T) {
 	plug := filepath.Join(e.Data, "plugin")
 	write(t, filepath.Join(plug, "sub", "a"), "a")
 	write(t, filepath.Join(plug, "sub", "stranger"), "s")
-	removeRecorded(e.Data, home, Entry{Root: plug, Files: []FileRec{{Path: "sub/a", SHA256: sum("a")}}})
+	removeRecorded(e.Data, home, Entry{Host: "claude", Root: plug, Files: []FileRec{{Path: "sub/a", SHA256: sum("a")}}})
 	if !exists(filepath.Join(plug, "sub", "stranger")) || exists(filepath.Join(plug, "sub", "a")) {
 		t.Fatal("wrong survivors")
 	}
@@ -476,12 +495,12 @@ func TestRemoveRecordedKeepsFolderWithUnrecordedFile(t *testing.T) {
 func TestRemoveRecordedMissingPathIsFine(t *testing.T) {
 	e, home := newEnv(t)
 	plug := filepath.Join(e.Data, "plugin")
-	n, notes := removeRecorded(e.Data, home, Entry{Root: plug, Files: []FileRec{{Path: "gone", SHA256: sum("g")}}})
+	n, notes := removeRecorded(e.Data, home, Entry{Host: "claude", Root: plug, Files: []FileRec{{Path: "gone", SHA256: sum("g")}}})
 	if n != 0 || len(notes) != 0 {
 		t.Fatalf("%d %v", n, notes)
 	}
 	write(t, filepath.Join(plug, "here"), "h")
-	n, notes = removeRecorded(e.Data, home, Entry{Root: plug, Files: []FileRec{{Path: "gone", SHA256: sum("g")}, {Path: "here", SHA256: sum("h")}}})
+	n, notes = removeRecorded(e.Data, home, Entry{Host: "claude", Root: plug, Files: []FileRec{{Path: "gone", SHA256: sum("g")}, {Path: "here", SHA256: sum("h")}}})
 	if n != 1 || len(notes) != 0 || exists(plug) {
 		t.Fatalf("%d %v", n, notes)
 	}

@@ -1,6 +1,8 @@
 package install
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,21 +86,35 @@ func (e *Env) claude(args ...string) ([]byte, error) {
 	return out, err
 }
 
-// parseList reads `claude plugin list --json`: an array of plugins, or an object with a "plugins" array. A plugin
-// is named by "id" (name@marketplace) or by "name" and "marketplace".
-func parseList(b []byte) ([]listed, error) {
-	var raw []map[string]any
-	if err := json.Unmarshal(b, &raw); err != nil {
-		var obj struct {
-			Plugins []map[string]any `json:"plugins"`
-		}
-		if err2 := json.Unmarshal(b, &obj); err2 != nil {
-			return nil, fmt.Errorf("cannot read the plugin list: %v", err)
-		}
-		raw = obj.Plugins
+// parseObjects reads a --json list: a top-level array, or an object holding the array under key. Anything else,
+// an error document included, is an error, so a list that cannot be trusted never reads as "not installed".
+func parseObjects(b []byte, key string) ([]map[string]any, error) {
+	var arr []map[string]any
+	if err := json.Unmarshal(b, &arr); err == nil {
+		return arr, nil
 	}
-	var out []listed
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return nil, fmt.Errorf("cannot read the list from claude: %v", err)
+	}
+	raw, ok := obj[key]
+	if !ok {
+		return nil, fmt.Errorf("the list from claude has no %q", key)
+	}
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil, fmt.Errorf("cannot read %q from claude: %v", key, err)
+	}
+	return arr, nil
+}
+
+// parseList reads `claude plugin list --json`. A plugin is named by "id" (name@marketplace) or by "name" and "marketplace".
+func parseList(b []byte) ([]listed, error) {
+	raw, err := parseObjects(b, "plugins")
+	if err != nil {
+		return nil, err
+	}
 	str := func(m map[string]any, k string) string { s, _ := m[k].(string); return s }
+	var out []listed
 	for _, m := range raw {
 		l := listed{Name: str(m, "name"), Marketplace: str(m, "marketplace"), Version: str(m, "version")}
 		if id := str(m, "id"); id != "" {
@@ -113,8 +129,8 @@ func parseList(b []byte) ([]listed, error) {
 	return out, nil
 }
 
-// sapulidiListed returns the installed sapulidi plugin, if any.
-func (e *Env) sapulidiListed() (*listed, error) {
+// sapulidiAll returns every installed plugin named sapulidi.
+func (e *Env) sapulidiAll() ([]listed, error) {
 	out, err := e.claude("plugin", "list", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("claude plugin list --json: %v", err)
@@ -123,12 +139,31 @@ func (e *Env) sapulidiListed() (*listed, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range items {
-		if items[i].Name == "sapulidi" {
-			return &items[i], nil
+	var all []listed
+	for _, l := range items {
+		if l.Name == "sapulidi" {
+			all = append(all, l)
 		}
 	}
-	return nil, nil
+	return all, nil
+}
+
+// marketplaceListed says whether our marketplace is known to claude.
+func (e *Env) marketplaceListed() (bool, error) {
+	out, err := e.claude("plugin", "marketplace", "list", "--json")
+	if err != nil {
+		return false, fmt.Errorf("claude plugin marketplace list --json: %v", err)
+	}
+	items, err := parseObjects(out, "marketplaces")
+	if err != nil {
+		return false, err
+	}
+	for _, m := range items {
+		if n, _ := m["name"].(string); n == Marketplace {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ---- extraction ----
@@ -140,7 +175,8 @@ func fileMode(rel string) os.FileMode {
 	return 0o644
 }
 
-// copyFS writes every file of src under dst and returns what it wrote with the hash of the content.
+// copyFS writes every file of src under dst and returns what it wrote with the hash of the content; on an
+// error it still returns the files written so far, so the caller can clean them up.
 func copyFS(src fs.FS, dst string) ([]FileRec, error) {
 	var files []FileRec
 	if err := os.MkdirAll(dst, 0o755); err != nil {
@@ -161,55 +197,112 @@ func copyFS(src fs.FS, dst string) ([]FileRec, error) {
 		if err := os.WriteFile(target, b, fileMode(p)); err != nil {
 			return err
 		}
-		if err := os.Chmod(target, fileMode(p)); err != nil {
-			return err
-		}
-		sum, err := hashFile(target)
-		if err != nil {
-			return err
-		}
-		files = append(files, FileRec{Path: path.Clean(p), SHA256: sum})
-		return nil
+		sum := sha256.Sum256(b)
+		files = append(files, FileRec{Path: path.Clean(p), SHA256: hex.EncodeToString(sum[:])})
+		return os.Chmod(target, fileMode(p))
 	})
 	return files, err
 }
 
-// clearOld removes what an earlier install of host recorded (hash-checked) and reports what it kept.
-func (e *Env) clearOld(rec *Record, host string) {
-	if old, ok := rec.find(host); ok {
-		_, notes := removeRecorded(e.Data, e.Home, old)
-		for _, n := range notes {
-			e.say("%s: %s", host, n)
-		}
+// dirty lists what in an installed folder is not exactly what was installed: files changed since install and
+// files nobody recorded. Nothing is deleted or changed here.
+func dirty(en Entry) []string {
+	rec := map[string]string{}
+	for _, f := range en.Files {
+		rec[f.Path] = f.SHA256
 	}
+	var out []string
+	_ = filepath.WalkDir(en.Root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(en.Root, p)
+		if rerr != nil {
+			return nil
+		}
+		want, ok := rec[filepath.ToSlash(rel)]
+		if !ok {
+			out = append(out, p+" (not installed by sapulidi)")
+		} else if got, herr := hashFile(p); herr != nil || got != want || !d.Type().IsRegular() {
+			out = append(out, p+" (changed since install)")
+		}
+		return nil
+	})
+	return out
 }
 
-// extractPlugin replaces <data>/plugin with the embedded plugin: the new tree is staged next to it and renamed in.
+func (e *Env) persist(rec *Record, en Entry) error {
+	rec.put(en)
+	return e.save(*rec)
+}
+
+// extractPlugin replaces <data>/plugin with the embedded plugin. Nothing is deleted before the old tree is
+// known to be exactly what was installed: the new tree is staged, the old folder is renamed aside, the new one
+// renamed in, and only then is the old one removed (by removeRecorded). A failure leaves the old tree in place.
 func (e *Env) extractPlugin(rec *Record, ver string) error {
-	e.clearOld(rec, "claude")
 	root := e.pluginDir()
-	if _, err := os.Lstat(root); err == nil {
-		return fmt.Errorf("%s exists with files that sapulidi did not install or that changed; move it away and run again", root)
+	old, hadOld := rec.find("claude")
+	if hadOld {
+		if _, err := os.Lstat(root); err != nil {
+			hadOld = false
+		}
+	}
+	switch {
+	case hadOld:
+		if d := dirty(Entry{Root: root, Files: old.Files}); len(d) > 0 {
+			return fmt.Errorf("%s was changed since install, nothing replaced: %s", root, strings.Join(d, "; "))
+		}
+	default:
+		if _, err := os.Lstat(root); err == nil {
+			return fmt.Errorf("%s exists and was not installed by sapulidi; move it away and run again", root)
+		}
 	}
 	if err := os.MkdirAll(e.Data, 0o755); err != nil {
 		return err
 	}
-	stage, err := os.MkdirTemp(e.Data, "plugin-staging-")
+	stage, err := os.MkdirTemp(e.Data, stagingPrefix)
 	if err != nil {
 		return err
+	}
+	cleanStage := func(files []FileRec) {
+		_, notes := removeRecorded(e.Data, e.Home, Entry{Host: "claude", Root: stage, Files: files})
+		for _, n := range notes {
+			e.say("claude: %s", n)
+		}
 	}
 	files, err := copyFS(e.Plugin, stage)
 	if err == nil {
 		err = os.Chmod(stage, 0o755)
 	}
-	if err == nil {
-		err = os.Rename(stage, root)
-	}
 	if err != nil {
-		return fmt.Errorf("%v (partial copy left in %s)", err, stage)
+		cleanStage(files)
+		return err
 	}
-	rec.put(Entry{Host: "claude", Root: root, Version: ver, Time: time.Now().UTC().Format(time.RFC3339), Files: files})
-	if err := e.save(*rec); err != nil {
+	aside := ""
+	if hadOld {
+		aside = filepath.Join(e.Data, fmt.Sprintf("%s%d", asidePrefix, time.Now().UnixNano()))
+		if err := os.Rename(root, aside); err != nil {
+			cleanStage(files)
+			return err
+		}
+	}
+	if err := os.Rename(stage, root); err != nil {
+		if aside != "" {
+			_ = os.Rename(aside, root)
+		}
+		cleanStage(files)
+		return err
+	}
+	if aside != "" {
+		_, notes := removeRecorded(e.Data, e.Home, Entry{Host: "claude", Root: aside, Files: old.Files})
+		for _, n := range notes {
+			e.say("claude: %s", n)
+		}
+	}
+	// the host steps already done stay recorded (the zero Entry when there was no record)
+	en := Entry{Host: "claude", Root: root, Version: ver, Time: time.Now().UTC().Format(time.RFC3339), Files: files,
+		AddedMarketplace: old.AddedMarketplace, InstalledPlugin: old.InstalledPlugin}
+	if err := e.persist(rec, en); err != nil {
 		return err
 	}
 	e.say("claude: extracted the plugin to %s", root)
@@ -257,81 +350,137 @@ func (e *Env) InstallAll() []Result {
 	return out
 }
 
+func failed(err error) Result { return Result{Status: "failed", Detail: err.Error()} }
+
 func (e *Env) installClaude() Result {
 	ver, err := e.embeddedVersion()
 	if err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+		return failed(err)
 	}
 	rec, err := e.load()
 	if err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+		return failed(err)
 	}
 	add := []string{"plugin", "marketplace", "add", e.pluginDir()}
 	install := []string{"plugin", "install", PluginID}
 	if _, err := exec.LookPath("claude"); err != nil {
 		if err := e.extractPlugin(&rec, ver); err != nil {
-			return Result{Status: "failed", Detail: err.Error()}
+			return failed(err)
 		}
 		return Result{Status: "not run", Detail: "claude is not on PATH; when it is, run:\n  claude " +
 			strings.Join(add, " ") + "\n  claude " + strings.Join(install, " ")}
 	}
-	cur, err := e.sapulidiListed()
+	all, err := e.sapulidiAll()
 	if err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+		return failed(err)
 	}
+	var cur *listed
+	for i := range all {
+		if all[i].Marketplace != Marketplace {
+			guide := "claude plugin uninstall sapulidi"
+			from := "an unknown source"
+			if all[i].Marketplace != "" {
+				guide += "@" + all[i].Marketplace
+				from = fmt.Sprintf("%q", all[i].Marketplace)
+			}
+			return Result{Status: "refused", Detail: fmt.Sprintf("a sapulidi plugin from %s is already installed and its hooks would run twice; "+
+				"remove it first: %s", from, guide)}
+		}
+		if cur == nil {
+			cur = &all[i]
+		}
+	}
+	en, hadRec := rec.find("claude")
+	byUs := func(owned bool) bool { return hadRec && owned }
 	status := "installed"
+	needAdd := false
 	if cur != nil {
-		if cur.Marketplace != Marketplace {
-			return Result{Status: "refused", Detail: fmt.Sprintf("a sapulidi plugin from %q is already installed and its hooks would run twice; "+
-				"remove it first: claude plugin uninstall sapulidi@%s", cur.Marketplace, cur.Marketplace)}
+		if !byUs(en.InstalledPlugin) {
+			return Result{Status: "already installed", Detail: fmt.Sprintf("%s (version %s) was installed by you, not by sapulidi: left alone and nothing recorded. "+
+				"To let sapulidi manage it, run claude plugin uninstall %s and then sapulidi agents install claude", PluginID, cur.Version, PluginID)}
 		}
 		if cur.Version == ver {
 			return Result{Status: "already installed", Detail: "version " + ver}
 		}
 		status = "upgraded"
+	} else {
+		present, err := e.marketplaceListed()
+		if err != nil {
+			return failed(err)
+		}
+		if present && !byUs(en.AddedMarketplace) {
+			return Result{Status: "already installed", Detail: fmt.Sprintf("the marketplace %s was added by you, not by sapulidi: left alone and nothing recorded. "+
+				"Run claude plugin install %s yourself, or remove the marketplace and run this again", Marketplace, PluginID)}
+		}
+		needAdd = !present
 	}
 	if err := e.extractPlugin(&rec, ver); err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+		return failed(err)
 	}
-	steps := [][]string{install}
-	if cur == nil {
-		steps = [][]string{add, install}
-	}
-	for _, s := range steps {
-		e.say("claude: %s", strings.Join(s, " "))
-		if _, err := e.claude(s...); err != nil {
-			return Result{Status: "failed", Detail: fmt.Sprintf("claude %s: %v", strings.Join(s, " "), err)}
+	en, _ = rec.find("claude")
+	if needAdd {
+		e.say("claude: %s", strings.Join(add, " "))
+		if _, err := e.claude(add...); err != nil {
+			// a duplicate add counts as success; anything else stops here
+			if present, lerr := e.marketplaceListed(); lerr != nil || !present {
+				return failed(fmt.Errorf("claude %s: %v", strings.Join(add, " "), err))
+			}
+		} else {
+			en.AddedMarketplace = true
+			if err := e.persist(&rec, en); err != nil {
+				return failed(err)
+			}
 		}
+	}
+	e.say("claude: %s", strings.Join(install, " "))
+	if _, err := e.claude(install...); err != nil {
+		return failed(fmt.Errorf("claude %s: %v", strings.Join(install, " "), err))
+	}
+	en.InstalledPlugin = true
+	if err := e.persist(&rec, en); err != nil {
+		return failed(err)
 	}
 	return Result{Status: status, Detail: "version " + ver}
 }
 
 func (e *Env) installSkills(h Host) Result {
 	skills := filepath.Join(e.Home, filepath.FromSlash(h.Skills))
-	if fi, err := os.Stat(skills); err != nil || !fi.IsDir() {
+	fi, err := os.Lstat(skills)
+	if err != nil || (!fi.IsDir() && fi.Mode()&os.ModeSymlink == 0) {
 		return Result{Status: "skipped", Detail: fmt.Sprintf("%s does not exist; create it and run again, or copy skills/sapulidi there yourself", skills)}
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return Result{Status: "refused", Detail: fmt.Sprintf("%s is a symlink; sapulidi never writes through one. Copy skills/sapulidi there yourself", skills)}
 	}
 	src, err := fs.Sub(e.Plugin, "skills/sapulidi")
 	if err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+		return failed(err)
 	}
 	rec, err := e.load()
 	if err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+		return failed(err)
 	}
-	e.clearOld(&rec, h.Name)
 	dest := filepath.Join(skills, "sapulidi")
+	if old, ok := rec.find(h.Name); ok {
+		if _, err := os.Lstat(dest); err == nil {
+			if d := dirty(Entry{Root: dest, Files: old.Files}); len(d) > 0 {
+				return Result{Status: "refused", Detail: fmt.Sprintf("%s was changed since install, nothing replaced: %s", dest, strings.Join(d, "; "))}
+			}
+			if _, notes := removeRecorded(e.Data, e.Home, old); len(notes) > 0 {
+				return Result{Status: "failed", Detail: strings.Join(notes, "; ")}
+			}
+		}
+	}
 	if _, err := os.Lstat(dest); err == nil {
-		return Result{Status: "refused", Detail: fmt.Sprintf("%s already exists and was not installed by sapulidi (or changed); move it away and run again", dest)}
+		return Result{Status: "refused", Detail: fmt.Sprintf("%s already exists and was not installed by sapulidi; move it away and run again", dest)}
 	}
 	files, err := copyFS(src, dest)
 	if err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+		return failed(err)
 	}
 	ver, _ := e.embeddedVersion()
-	rec.put(Entry{Host: h.Name, Root: dest, Version: ver, Time: time.Now().UTC().Format(time.RFC3339), Files: files})
-	if err := e.save(rec); err != nil {
-		return Result{Status: "failed", Detail: err.Error()}
+	if err := e.persist(&rec, Entry{Host: h.Name, Root: dest, Version: ver, Time: time.Now().UTC().Format(time.RFC3339), Files: files}); err != nil {
+		return failed(err)
 	}
 	return Result{Status: "installed", Detail: "copied the skill to " + dest}
 }
@@ -374,7 +523,11 @@ func (e *Env) Remove(name string) ([]Result, error) {
 func (e *Env) removeHost(rec *Record, en Entry) Result {
 	var notes []string
 	if en.Host == "claude" {
-		notes = append(notes, e.uninstallClaude()...)
+		ok, n := e.undoClaude(rec, &en)
+		notes = append(notes, n...)
+		if !ok {
+			return Result{Status: "partial", Detail: "claude steps are left, so the record and the extracted folder are kept; fix that and run again", Notes: notes}
+		}
 	}
 	n, more := removeRecorded(e.Data, e.Home, en)
 	notes = append(notes, more...)
@@ -399,28 +552,47 @@ func (e *Env) removeHost(rec *Record, en Entry) Result {
 	return Result{Status: status, Detail: fmt.Sprintf("%d files removed", n), Notes: notes}
 }
 
-// uninstallClaude runs the two host commands that undo the install and returns a line for each problem.
-func (e *Env) uninstallClaude() []string {
+// undoClaude undoes the host steps sapulidi ran, in reverse order, and nothing else. Each finished step is
+// cleared in the record at once, so a rerun does only what is left. It returns false when a step is left.
+func (e *Env) undoClaude(rec *Record, en *Entry) (bool, []string) {
+	if !en.InstalledPlugin && !en.AddedMarketplace {
+		return true, nil
+	}
 	if _, err := exec.LookPath("claude"); err != nil {
-		return []string{"claude is not on PATH; run: claude plugin uninstall " + PluginID + " and claude plugin marketplace remove " + Marketplace}
+		return false, []string{"claude is not on PATH; run: claude plugin uninstall " + PluginID + " and claude plugin marketplace remove " + Marketplace + ", or put claude on PATH and run this again"}
 	}
-	var notes []string
-	cur, err := e.sapulidiListed()
-	if err != nil {
-		notes = append(notes, err.Error())
-	}
-	var steps [][]string
-	if cur != nil && cur.Marketplace == Marketplace {
-		steps = append(steps, []string{"plugin", "uninstall", PluginID})
-	}
-	steps = append(steps, []string{"plugin", "marketplace", "remove", Marketplace})
-	for _, s := range steps {
-		e.say("claude: %s", strings.Join(s, " "))
-		if _, err := e.claude(s...); err != nil {
-			notes = append(notes, fmt.Sprintf("claude %s: %v", strings.Join(s, " "), err))
+	if en.InstalledPlugin {
+		all, err := e.sapulidiAll()
+		if err != nil {
+			return false, []string{err.Error()}
+		}
+		for _, l := range all {
+			if l.Marketplace == Marketplace {
+				step := []string{"plugin", "uninstall", PluginID}
+				e.say("claude: %s", strings.Join(step, " "))
+				if _, err := e.claude(step...); err != nil {
+					return false, []string{fmt.Sprintf("claude %s: %v", strings.Join(step, " "), err)}
+				}
+				break
+			}
+		}
+		en.InstalledPlugin = false
+		if err := e.persist(rec, *en); err != nil {
+			return false, []string{err.Error()}
 		}
 	}
-	return notes
+	if en.AddedMarketplace {
+		step := []string{"plugin", "marketplace", "remove", Marketplace}
+		e.say("claude: %s", strings.Join(step, " "))
+		if _, err := e.claude(step...); err != nil {
+			return false, []string{fmt.Sprintf("claude %s: %v", strings.Join(step, " "), err)}
+		}
+		en.AddedMarketplace = false
+		if err := e.persist(rec, *en); err != nil {
+			return false, []string{err.Error()}
+		}
+	}
+	return true, nil
 }
 
 // ---- list ----
@@ -434,22 +606,29 @@ type Status struct {
 }
 
 // List reports every host: whether it is present and whether sapulidi is installed in it. Claude is asked
-// through its CLI; the others are installed when the recorded copy exists.
-func (e *Env) List() []Status {
-	rec, _ := e.load()
+// through its CLI; the others are installed when the recorded copy exists. A record that cannot be read is
+// returned as an error and shown on every row, never as "not installed".
+func (e *Env) List() ([]Status, error) {
+	rec, rerr := e.load()
 	var out []Status
 	for _, d := range e.Detect() {
 		s := Status{Host: d.Host, Present: d.Present}
-		if d.Host.Name == "claude" {
+		if rerr != nil {
+			s.Detail = "cannot read agents.json: " + rerr.Error()
+		} else if d.Host.Name == "claude" {
 			if _, err := exec.LookPath("claude"); err == nil {
-				cur, err := e.sapulidiListed()
+				all, err := e.sapulidiAll()
 				switch {
 				case err != nil:
 					s.Detail = err.Error()
-				case cur != nil && cur.Marketplace == Marketplace:
-					s.Installed, s.Detail = true, "version "+cur.Version
-				case cur != nil:
-					s.Detail = "a sapulidi plugin from " + cur.Marketplace + " is installed"
+				default:
+					for _, l := range all {
+						if l.Marketplace == Marketplace {
+							s.Installed, s.Detail = true, "version "+l.Version
+						} else if !s.Installed {
+							s.Detail = "a sapulidi plugin from another source is installed"
+						}
+					}
 				}
 			}
 		} else if en, ok := rec.find(d.Host.Name); ok {
@@ -459,5 +638,5 @@ func (e *Env) List() []Status {
 		}
 		out = append(out, s)
 	}
-	return out
+	return out, rerr
 }

@@ -65,10 +65,21 @@ func hostNames() []string {
 }
 
 func agentsList(app *App, env *install.Env) int {
-	rows := env.List()
+	rows, lerr := env.List()
+	code := 0
+	if lerr != nil {
+		code = 1
+	}
 	if app.JSON {
-		writeJSON(app.Stdout, map[string]any{"hosts": rows})
-		return 0
+		doc := map[string]any{"hosts": rows}
+		if lerr != nil {
+			doc["error"] = lerr.Error()
+		}
+		writeJSON(app.Stdout, doc)
+		return code
+	}
+	if lerr != nil {
+		fmt.Fprintf(app.Stderr, "sapulidi: agents: cannot read agents.json: %v\n", lerr)
 	}
 	for _, r := range rows {
 		line := fmt.Sprintf("%-12s %-12s %s", r.Host.Name, map[bool]string{true: "detected", false: "not found"}[r.Present],
@@ -81,7 +92,7 @@ func agentsList(app *App, env *install.Env) int {
 		}
 		fmt.Fprintln(app.Stdout, line)
 	}
-	return 0
+	return code
 }
 
 func agentsReport(app *App, res []install.Result) int {

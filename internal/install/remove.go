@@ -28,20 +28,26 @@ func within(root, p string) bool {
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
-// allowedRoot is true when root is <data>/plugin, or a folder called sapulidi directly inside a host's skills folder.
-func allowedRoot(data, home, root string) bool {
-	if root == filepath.Join(data, "plugin") {
-		return true
+const (
+	stagingPrefix = "plugin-staging-"
+	asidePrefix   = "plugin-old-"
+)
+
+// isTemp is true for the folders extractPlugin makes next to <data>/plugin while it replaces it.
+func isTemp(data, root string) bool {
+	b := filepath.Base(root)
+	return filepath.Dir(root) == data &&
+		(strings.HasPrefix(b, stagingPrefix) && len(b) > len(stagingPrefix) || strings.HasPrefix(b, asidePrefix) && len(b) > len(asidePrefix))
+}
+
+// allowedRoot binds a record's root to its host: claude owns <data>/plugin (and the two temp folders of its
+// replacement); any other host owns exactly <home>/<its skills folder>/sapulidi.
+func allowedRoot(data, home, host, root string) bool {
+	if host == "claude" {
+		return root == filepath.Join(data, "plugin") || isTemp(data, root)
 	}
-	if filepath.Base(root) != "sapulidi" {
-		return false
-	}
-	for _, h := range Hosts {
-		if filepath.Dir(root) == filepath.Join(home, filepath.FromSlash(h.Skills)) {
-			return true
-		}
-	}
-	return false
+	h, ok := FindHost(host)
+	return ok && root == filepath.Join(home, filepath.FromSlash(h.Skills), "sapulidi")
 }
 
 // removeRecorded is the ONLY place in this package that deletes. It removes the files of one recorded entry
@@ -50,12 +56,20 @@ func allowedRoot(data, home, root string) bool {
 // delete). It returns how many files it removed and one line per thing it kept or refused.
 func removeRecorded(data, home string, e Entry) (int, []string) {
 	root := filepath.Clean(e.Root)
-	if !allowedRoot(data, home, root) {
-		return 0, []string{fmt.Sprintf("refused: %s is not a folder sapulidi installs into", e.Root)}
+	if !allowedRoot(data, home, e.Host, root) {
+		return 0, []string{fmt.Sprintf("refused: %s is not a folder sapulidi installs into for %q", e.Root, e.Host)}
 	}
 	ri, err := os.Lstat(root)
 	if err != nil {
 		return 0, nil // already gone
+	}
+	if e.Host != "claude" {
+		if si, err := os.Lstat(filepath.Dir(root)); err != nil || si.Mode()&os.ModeSymlink != 0 {
+			return 0, []string{fmt.Sprintf("refused: %s is a symlink or unreadable, kept", filepath.Dir(root))}
+		}
+	}
+	if len(e.Files) == 0 && !isTemp(data, root) {
+		return 0, []string{fmt.Sprintf("%s: no files recorded, kept", root)}
 	}
 	if ri.Mode()&os.ModeSymlink != 0 || !ri.IsDir() {
 		return 0, []string{fmt.Sprintf("refused: %s is a symlink or not a folder, kept", root)}
