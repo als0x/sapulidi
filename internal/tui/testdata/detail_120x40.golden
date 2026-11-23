@@ -1,0 +1,40 @@
+path       /home/user/.cache/go-build
+size       2.9 GB
+created    2025-01-10 (22mo)
+updatedAt  2026-11-01
+category   go | go/go-build@1
+source     auto
+why        Go build cache not used for 20 days
+
+guards that passed
+  deny: not on the deny list
+  fresh: newest change 23 days ago, minimum 14
+
+largest inside
+   858.3 MB  3a
+   381.5 MB  7f
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+esc: back  space: select  x: exclude  d: delete
