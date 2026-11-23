@@ -43,7 +43,8 @@ func TestCleanOnceNeverRunsLowDiskTier(t *testing.T) {
 		return []core.Candidate{{Category: "deps", RuleKey: "x/deps@1", Path: other, Base: tmp, Removal: core.RenameDelete, Bytes: -1}}
 	})
 	env := &core.Env{
-		Home: f.home, Now: time.Now(), TempDir: tmp, Ctx: context.Background(),
+		Exclusions: testutil.NoExclusions,
+		Home:       f.home, Now: time.Now(), TempDir: tmp, Ctx: context.Background(),
 		Platform: &testutil.FakePlatform{Temp: tmp, Free: 1 << 20}, // far below the limit
 		Run:      f.run, Log: &testutil.MemLogger{},
 		Settings: &testutil.FakeSettings{ConsentAll: true, LowDisk: 1 << 50, Categories: map[string]bool{"deps": true}},

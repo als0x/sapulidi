@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"sync"
@@ -28,6 +29,15 @@ type Options struct {
 	// IgnoreEnabled, only with Paths and Only, runs an optional category that is not enabled; consent and every
 	// guard still apply.
 	IgnoreEnabled bool
+	// ShowOptionalOff, a Plan option (Run ignores it), also lists the candidates of optional categories that are
+	// switched off, tagged Source "optional-off".
+	ShowOptionalOff bool `json:"-" toml:"-"`
+	// Explicit is a list of exact paths the user picked in the terminal UI. For those paths only, the
+	// category-enabled state and the per-rule consent are waived; every guard, the never bucket, exclusions, the
+	// pause file and the run lock still apply. In-process only: nothing outside engine and tui may set it.
+	// Entries that are empty, relative or not filepath.Clean'ed select nothing and are kept as not-a-candidate.
+	// It cannot be combined with Paths.
+	Explicit []string `json:"-" toml:"-"`
 }
 
 // Summary is the outcome of Plan or Run.
@@ -96,17 +106,20 @@ var slowCategories = map[string]bool{"worktrees": true, "worktree-prune": true, 
 	"toolchains": true, "browsers": true, "caches": true, "project": true}
 
 type runner struct {
-	env     *core.Env // a copy of the caller's env with the budget context and the fact sink
-	opt     Options
-	rules   map[string]core.Rule
-	cats    map[string]core.Category
-	paths   map[string]bool
-	sum     *Summary
-	sink    *factSink
-	dry     bool // every candidate is a dry run
-	gate    bool // consent gating applies (false before setup: everything is dry anyway)
-	waiting map[string]bool
-	logged  bool
+	env         *core.Env // a copy of the caller's env with the budget context and the fact sink
+	opt         Options
+	rules       map[string]core.Rule
+	cats        map[string]core.Category
+	paths       map[string]bool
+	explicit    bool            // Options.Explicit is set: the Explicit waivers apply to explicitSet members only
+	explicitSet map[string]bool // the valid (absolute, clean) Explicit paths
+	showOff     bool            // Plan with ShowOptionalOff
+	sum         *Summary
+	sink        *factSink
+	dry         bool // every candidate is a dry run
+	gate        bool // consent gating applies (false before setup: everything is dry anyway)
+	waiting     map[string]bool
+	logged      bool
 
 	paused    func() bool // reads the pause file; nil when there is no store (Plan)
 	pauseAt   time.Time
@@ -129,7 +142,28 @@ func newRunner(env *core.Env, opt Options, ctx context.Context, sum *Summary) *r
 			r.paths[p] = true
 		}
 	}
+	if len(opt.Explicit) > 0 {
+		r.explicit = true
+		r.explicitSet = map[string]bool{}
+		for _, p := range opt.Explicit {
+			// Only an absolute, clean path selects anything: "" would match every path-less candidate.
+			if p != "" && filepath.IsAbs(p) && filepath.Clean(p) == p {
+				r.explicitSet[p] = true
+			}
+		}
+	}
 	return r
+}
+
+// refuse says why a run or plan must not start at all, or "".
+func refuse(env *core.Env, opt Options) string {
+	if env.Exclusions == nil {
+		return "exclusions-not-loaded" // never run without knowing what the user protects
+	}
+	if len(opt.Paths) > 0 && len(opt.Explicit) > 0 {
+		return "paths-and-explicit"
+	}
+	return ""
 }
 
 func (r *runner) event(kind string, fields map[string]any) {
@@ -169,6 +203,9 @@ func contains(list []string, s string) bool { return slices.Contains(list, s) }
 
 // scan runs the categories in order and handles their candidates.
 func (r *runner) scan(cats []core.Category) {
+	if r.explicit && len(r.explicitSet) == 0 {
+		return // nothing valid was selected: scan nothing
+	}
 	for _, cat := range cats {
 		r.cats[cat.Name()] = cat
 	}
@@ -199,6 +236,7 @@ func (r *runner) scanOne(cat core.Category) bool {
 	}
 	if !r.env.Settings.CategoryEnabled(name) {
 		ignore := r.opt.IgnoreEnabled && len(r.opt.Paths) > 0 && contains(r.opt.Only, name) && cat.Bucket() == core.Optional
+		ignore = ignore || r.explicit || (r.showOff && cat.Bucket() == core.Optional)
 		if !ignore {
 			return true
 		}
@@ -223,9 +261,12 @@ func (r *runner) scanOne(cat core.Category) bool {
 }
 
 // sourceOf says where a candidate comes from: an auto category or rule, or an enabled optional category.
-func sourceOf(cat core.Category, rule core.Rule) string {
+func (r *runner) sourceOf(cat core.Category, rule core.Rule) string {
 	if cat.Bucket() == core.Auto || rule.Bucket == core.Auto {
 		return "auto"
+	}
+	if !r.env.Settings.CategoryEnabled(cat.Name()) {
+		return "optional-off"
 	}
 	return "optional-on"
 }
@@ -236,7 +277,12 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 	if !r.env.Settings.RuleEnabled(c.RuleKey) {
 		return
 	}
-	if !lowDisk && r.paths != nil && !r.paths[c.Path] {
+	if r.explicit {
+		// A path-less candidate (worktree prune) is not a user-selectable path.
+		if c.Path == "" || !r.explicitSet[c.Path] {
+			return
+		}
+	} else if !lowDisk && r.paths != nil && !r.paths[c.Path] {
 		return
 	}
 	if c.Removal == core.ReportOnly {
@@ -259,7 +305,7 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 		return
 	}
 	if !r.opt.Quick && c.Path != "" {
-		c.Source = sourceOf(cat, rule)
+		c.Source = r.sourceOf(cat, rule)
 		m, err := guard.Measure(r.env.Ctx, c.Path)
 		c.Created, c.Updated = m.Born, m.Newest
 		if err == nil {
@@ -271,7 +317,7 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 		return
 	}
 	dry := r.dry
-	if r.gate && (cat.Bucket() == core.Auto || rule.Bucket == core.Auto) && !r.env.Settings.Consented(c.RuleKey) {
+	if r.gate && !r.explicit && (cat.Bucket() == core.Auto || rule.Bucket == core.Auto) && !r.env.Settings.Consented(c.RuleKey) {
 		r.waiting[c.RuleKey] = true
 		dry = true
 	}
@@ -390,7 +436,47 @@ func (r *runner) freeBytes() uint64 {
 	return n
 }
 
+// reportMissing keeps every Explicit path that no category turned into a candidate or a keep.
+func (r *runner) reportMissing(s *Summary) {
+	if !r.explicit {
+		return
+	}
+	why := "not-a-candidate"
+	if s.Stopped { // the scan did not finish: an unseen path may still have been a candidate
+		why = "budget"
+		if r.pauseSeen {
+			why = "paused"
+		}
+	}
+	seen := map[string]bool{}
+	for _, c := range s.Removed {
+		seen[c.Path] = true
+	}
+	for _, c := range s.WouldRemove {
+		seen[c.Path] = true
+	}
+	for _, ks := range [][]core.Kept{s.Kept, s.Failed} {
+		for _, k := range ks {
+			seen[k.Path] = true
+		}
+	}
+	done := map[string]bool{}
+	for _, p := range r.opt.Explicit {
+		if done[p] {
+			continue
+		}
+		done[p] = true
+		switch {
+		case !r.explicitSet[p]: // empty, relative or unclean: it never selected anything
+			s.Kept = append(s.Kept, core.Kept{Path: p, Why: "not-a-candidate"})
+		case !seen[p]:
+			s.Kept = append(s.Kept, core.Kept{Path: p, Why: why})
+		}
+	}
+}
+
 func (r *runner) finishSummary(s *Summary) {
+	r.reportMissing(s)
 	for k := range r.waiting {
 		s.Waiting = append(s.Waiting, k)
 	}
@@ -399,11 +485,15 @@ func (r *runner) finishSummary(s *Summary) {
 
 // Plan reports what a run would do. It never removes anything.
 func Plan(env *core.Env, cats []core.Category, opt Options) Summary {
+	if refuse(env, opt) != "" {
+		return Summary{Mode: "error"}
+	}
 	ctx, cancel := budgetCtx(env, opt)
 	defer cancel()
 	s := Summary{Mode: "dry-run"}
 	r := newRunner(env, opt, ctx, &s)
 	r.dry, r.gate = true, true
+	r.showOff = opt.ShowOptionalOff
 	s.FreeBefore = r.freeBytes()
 	r.scan(cats)
 	s.FreeAfter = s.FreeBefore
@@ -425,6 +515,13 @@ func budgetCtx(env *core.Env, opt Options) (context.Context, context.CancelFunc)
 
 // Run plans and removes.
 func Run(env *core.Env, cats []core.Category, st *state.Store, opt Options) (Summary, error) {
+	opt.ShowOptionalOff = false // a plan option only
+	if refuse(env, opt) != "" {
+		return Summary{Mode: "error"}, nil
+	}
+	if len(opt.Explicit) > 0 {
+		opt.Trigger = "tui"
+	}
 	if st.Paused() {
 		return Summary{Mode: "paused"}, nil
 	}
@@ -457,7 +554,7 @@ func Run(env *core.Env, cats []core.Category, st *state.Store, opt Options) (Sum
 	switch {
 	case forced != "":
 		s.Mode, r.dry = forced, true
-	case consent == nil:
+	case consent == nil && !r.explicit:
 		s.Mode, r.dry = "no-consent", true
 	case opt.DryRun:
 		s.Mode, r.dry = "dry-run", true
@@ -477,7 +574,7 @@ func Run(env *core.Env, cats []core.Category, st *state.Store, opt Options) (Sum
 	// The low-disk tier runs only in a full run: a clean-once or filtered run removes only what was asked for.
 	// A quick run skips the hook altogether: its candidates come from slow categories and sizing them is slow.
 	if !r.dry && !opt.Quick && !s.Stopped && lowDisk != nil && limit > 0 && s.FreeAfter < limit &&
-		len(opt.Paths) == 0 && len(opt.Only) == 0 {
+		len(opt.Paths) == 0 && len(opt.Only) == 0 && !r.explicit {
 		for _, c := range r.callLowDisk(&s) {
 			if s.FreeAfter >= limit || r.stopped() {
 				break
@@ -500,15 +597,21 @@ func Run(env *core.Env, cats []core.Category, st *state.Store, opt Options) (Sum
 	if len(s.Waiting) > 0 {
 		r.sink.Fact("waiting-rules", fmt.Sprintf("%d rule(s) wait for your confirmation: run setup.", len(s.Waiting)))
 	}
-	r.flushFacts(st)
+	if !r.explicit { // an Explicit run shows no notification and does not use up the notify-once flag
+		r.flushFacts(st)
+	}
 
 	if afterRun != nil {
 		r.callAfter(st, &s)
 	}
 	st.RunRecord(s)
-	r.event("summary", map[string]any{"mode": s.Mode, "trigger": opt.Trigger, "removed": len(s.Removed),
+	fields := map[string]any{"mode": s.Mode, "trigger": opt.Trigger, "removed": len(s.Removed),
 		"would_remove": len(s.WouldRemove), "kept": len(s.Kept), "failed": len(s.Failed),
-		"freed_bytes": s.FreedBytes, "stopped": s.Stopped})
+		"freed_bytes": s.FreedBytes, "stopped": s.Stopped}
+	if r.explicit {
+		fields["explicit"] = len(opt.Explicit)
+	}
+	r.event("summary", fields)
 	return s, nil
 }
 

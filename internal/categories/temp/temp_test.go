@@ -41,7 +41,8 @@ func newFixture(t *testing.T) *fixture {
 	}
 	fp := &testutil.FakePlatform{Temp: tmp, Free: 100 << 30}
 	env := &core.Env{
-		Home: home, Now: time.Now(), Rules: testRules(), Platform: fp, Run: &testutil.FakeRunner{},
+		Exclusions: testutil.NoExclusions,
+		Home:       home, Now: time.Now(), Rules: testRules(), Platform: fp, Run: &testutil.FakeRunner{},
 		Settings: &testutil.FakeSettings{ConsentAll: true}, Log: &testutil.MemLogger{}, Ctx: context.Background(),
 		TempDir: tmp,
 	}

@@ -45,7 +45,8 @@ func newFixture(t *testing.T) *fixture {
 	fr := &testutil.FakeRunner{Paths: map[string]string{}}
 	set := &testutil.FakeSettings{Categories: map[string]bool{"caches": true, "mcp-runtime": true}}
 	env := &core.Env{
-		Home: home, Now: time.Now(), Rules: loadRules(t), Platform: &testutil.FakePlatform{Free: 100 << 30},
+		Exclusions: testutil.NoExclusions,
+		Home:       home, Now: time.Now(), Rules: loadRules(t), Platform: &testutil.FakePlatform{Free: 100 << 30},
 		Run: fr, Settings: set, Log: &testutil.MemLogger{}, Ctx: context.Background(),
 	}
 	return &fixture{home: home, fr: fr, set: set, env: env}
