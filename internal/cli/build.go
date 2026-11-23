@@ -9,6 +9,8 @@ import (
 
 	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/core"
+	"github.com/als0x/sapulidi/internal/engine"
+	"github.com/als0x/sapulidi/internal/exclude"
 	"github.com/als0x/sapulidi/internal/execx"
 	packsload "github.com/als0x/sapulidi/internal/packs"
 	"github.com/als0x/sapulidi/internal/platform"
@@ -74,6 +76,13 @@ func buildEnv() (*core.Env, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A corrupt exclude.toml fails the command closed: nothing may run without knowing what the user protects.
+	excl, err := exclude.Load(paths)
+	if err != nil {
+		engine.SetExclusions(nil)
+		return nil, err
+	}
+	engine.SetExclusions(excl)
 	st, err := state.Open(paths)
 	if err != nil {
 		return nil, err
