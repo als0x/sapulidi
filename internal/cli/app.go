@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/als0x/sapulidi/internal/core"
 )
@@ -40,8 +41,10 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	args = rest
 	if len(args) == 0 {
-		usage(stderr)
-		return 2
+		return noArgs(app)
+	}
+	if strings.HasPrefix(args[0], "-") && args[0] != "--" {
+		return runFlags(app, args)
 	}
 	c, ok := commands[args[0]]
 	if !ok {
@@ -76,5 +79,6 @@ func runHelp(app *App, _ []string) int {
 	for _, c := range sortedCommands() {
 		fmt.Fprintf(app.Stdout, "  %-12s %s\n", c.Name, c.Summary)
 	}
+	frontHelp(app)
 	return 0
 }
