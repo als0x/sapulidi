@@ -1,0 +1,14 @@
+package plant
+
+import (
+	"os"
+	"syscall"
+)
+
+func other() { os.Remove("x") }
+
+func removeRecorded() {
+	os.Remove("ok")
+	os.RemoveAll("bad")
+	syscall.Unlink("bad")
+}
