@@ -49,6 +49,7 @@ type Config struct {
 	Rules           map[string]RuleConf
 	Agent           AgentConf
 	Notify          NotifyConf
+	Schedule        ScheduleConf
 
 	// Invalid lists config files that exist but are not valid TOML. NewSettings fails closed on such a config:
 	// nothing is enabled and nothing is consented until the file is fixed.
@@ -66,6 +67,7 @@ func Defaults() *Config {
 		Rules:           map[string]RuleConf{},
 		Agent:           AgentConf{CLI: "", Interval: Duration(7 * 24 * time.Hour), MaxUSD: 0.25},
 		Notify:          NotifyConf{Enabled: false},
+		Schedule:        ScheduleConf{Interval: DefaultScheduleInterval},
 		sources:         map[string]string{},
 	}
 }
@@ -283,6 +285,29 @@ func (c *Config) merge(raw map[string]any, src string) []string {
 					c.Notify.Enabled, c.sources[key] = b, src
 				}
 			}
+		case "schedule":
+			t, ok := table(k, v)
+			if !ok {
+				continue
+			}
+			for _, f := range sortedKeys(t) {
+				key := "schedule." + f
+				if f != "interval" {
+					unknown(key)
+					continue
+				}
+				s, ok := t[f].(string)
+				if !ok {
+					warn("%s must be a string like \"30m\"; ignored", key)
+					continue
+				}
+				d, err := ParseScheduleInterval(s)
+				if err != nil {
+					warn("%s: %v; default kept", key, err)
+					continue
+				}
+				c.Schedule.Interval, c.sources[key] = d, src
+			}
 		default:
 			unknown(k)
 		}
@@ -312,6 +337,7 @@ func (c *Config) Effective() []Value {
 		{"agent.interval", c.Agent.Interval.String(), src("agent.interval")},
 		{"agent.max_usd", strconv.FormatFloat(c.Agent.MaxUSD, 'f', -1, 64), src("agent.max_usd")},
 		{"notify.enabled", strconv.FormatBool(c.Notify.Enabled), src("notify.enabled")},
+		{"schedule.interval", FormatInterval(c.Schedule.Interval), src("schedule.interval")},
 	}
 	for n, cc := range c.Categories {
 		if cc.Enabled != nil {

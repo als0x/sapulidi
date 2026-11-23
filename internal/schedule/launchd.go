@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/state/atomic"
@@ -126,13 +128,23 @@ func (b *Launchd) Status(label string) (Status, error) {
 		return Status{}, err
 	}
 	var parts []string
+	next := ""
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
+		// Assumed format, not checked against a real launchctl: "time until next run = 754 seconds". A line that
+		// does not match leaves the next run unknown; it is never guessed.
+		if rest, ok := strings.CutPrefix(line, "time until next run = "); ok {
+			if f := strings.Fields(rest); len(f) > 0 {
+				if n, err := strconv.Atoi(f[0]); err == nil && n >= 0 {
+					next = (time.Duration(n) * time.Second).String()
+				}
+			}
+		}
 		for _, k := range []string{"runs = ", "last exit code = ", "run interval = "} {
 			if strings.HasPrefix(line, k) {
 				parts = append(parts, line)
 			}
 		}
 	}
-	return Status{Installed: true, Detail: strings.Join(parts, ", ")}, nil
+	return Status{Installed: true, Detail: strings.Join(parts, ", "), Next: next}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/core"
 )
 
@@ -22,16 +23,22 @@ func (b *Cron) Name() string { return "cron" }
 func beginMark(label string) string { return "# sapulidi:" + label + " begin\n" }
 func endMark(label string) string   { return "# sapulidi:" + label + " end\n" }
 
+// cronSpec turns an interval into a cron expression. Cron has no "every N" beyond a field's range, so only these
+// intervals exist: whole minutes 5 to 59 (*/N), whole hours up to 23 (0 */N), exactly 1d (daily at 03:17) and
+// exactly 7d (weekly, Sunday 03:17). Anything else is refused, never rounded.
 func cronSpec(interval time.Duration) (string, error) {
 	switch {
 	case interval == 7*24*time.Hour:
 		return "17 3 * * 0", nil
-	case interval >= time.Minute && interval < time.Hour && interval%time.Minute == 0:
+	case interval == 24*time.Hour:
+		return "17 3 * * *", nil
+	case interval >= 5*time.Minute && interval < time.Hour && interval%time.Minute == 0:
 		return fmt.Sprintf("*/%d * * * *", int(interval/time.Minute)), nil
 	case interval >= time.Hour && interval < 24*time.Hour && interval%time.Hour == 0:
 		return fmt.Sprintf("0 */%d * * *", int(interval/time.Hour)), nil
 	}
-	return "", fmt.Errorf("schedule: cron cannot express an interval of %s", interval)
+	return "", fmt.Errorf("cron cannot run every %s; use 5 to 59 minutes, whole hours up to 23, 1d or 7d",
+		config.FormatInterval(interval))
 }
 
 func (b *Cron) block(j Job, pathEnv string) (string, error) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/execx"
@@ -27,17 +28,43 @@ func init() {
 	Register(Command{Name: "schedule", Summary: "install, remove or show the scheduled run", Run: runSchedule})
 }
 
-const scheduleUsage = "usage: sapulidi schedule install|remove|status [run|agent]"
+const scheduleUsage = "usage: sapulidi schedule install [run] [--every <interval>] | remove|status [run|agent]"
 
 type scheduleStatusJSON struct {
-	Backend   string   `json:"backend"`
-	Label     string   `json:"label"`
-	Installed bool     `json:"installed"`
-	Warnings  []string `json:"warnings"`
+	Backend     string   `json:"backend"`
+	Label       string   `json:"label"`
+	Installed   bool     `json:"installed"`
+	Interval    string   `json:"interval"`
+	NextRun     string   `json:"next_run"`
+	DryRunsOnly bool     `json:"dry_runs_only"`
+	Warnings    []string `json:"warnings"`
+}
+
+// takeEvery removes `--every <v>` or `--every=<v>` from args.
+func takeEvery(args []string) (rest []string, every string, given, ok bool) {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--every":
+			if i+1 >= len(args) || given {
+				return nil, "", false, false
+			}
+			every, given = args[i+1], true
+			i++
+		case strings.HasPrefix(a, "--every="):
+			if given {
+				return nil, "", false, false
+			}
+			every, given = strings.TrimPrefix(a, "--every="), true
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return rest, every, given, true
 }
 
 func runSchedule(app *App, args []string) int {
-	if len(args) < 1 || len(args) > 2 {
+	args, every, hasEvery, ok := takeEvery(args)
+	if !ok || len(args) < 1 || len(args) > 2 {
 		fmt.Fprintln(app.Stderr, scheduleUsage)
 		return 2
 	}
@@ -47,9 +74,19 @@ func runSchedule(app *App, args []string) int {
 		target = args[1]
 	}
 	if (action != "install" && action != "remove" && action != "status") ||
-		(target != "" && target != "run" && target != "agent") {
+		(target != "" && target != "run" && target != "agent") ||
+		(hasEvery && (action != "install" || target == "agent")) {
 		fmt.Fprintln(app.Stderr, scheduleUsage)
 		return 2
+	}
+	var everyD time.Duration
+	if hasEvery {
+		d, err := schedule.ParseInterval(every)
+		if err != nil {
+			fmt.Fprintf(app.Stderr, "sapulidi: schedule install --every: %v\n", err)
+			return 2
+		}
+		everyD = d
 	}
 	be, paths, err := scheduleSetup()
 	if err != nil {
@@ -65,6 +102,13 @@ func runSchedule(app *App, args []string) int {
 			jobs = append(jobs, j)
 		}
 	}
+	if hasEvery {
+		for i := range jobs {
+			if jobs[i].Label == schedule.LabelRun {
+				jobs[i].Interval = everyD
+			}
+		}
+	}
 	switch action {
 	case "install":
 		for _, j := range jobs {
@@ -76,8 +120,15 @@ func runSchedule(app *App, args []string) int {
 				fmt.Fprintf(app.Stderr, "sapulidi: schedule install %s: %v\n", j.Label, err)
 				return 1
 			}
+			// Stored only once the backend accepted the interval, so a refusal keeps the old value.
+			if hasEvery && j.Label == schedule.LabelRun {
+				if err := config.Apply(paths, config.Change{Key: "schedule.interval", Value: every}); err != nil {
+					fmt.Fprintf(app.Stderr, "sapulidi: schedule install: %v\n", err)
+					return 1
+				}
+			}
 			if !app.JSON {
-				fmt.Fprintf(app.Stdout, "installed %s (%s)\n", j.Label, be.Name())
+				fmt.Fprintf(app.Stdout, "installed %s (%s), every %s\n", j.Label, be.Name(), config.FormatInterval(j.Interval))
 			}
 		}
 	case "remove":
@@ -92,12 +143,22 @@ func runSchedule(app *App, args []string) int {
 		}
 	}
 	if action == "status" || app.JSON {
-		return printScheduleStatus(app, be, jobs)
+		return printScheduleStatus(app, be, paths, jobs)
 	}
 	return 0
 }
 
-func printScheduleStatus(app *App, be schedule.Backend, jobs []schedule.Job) int {
+// consentRecorded reports whether setup has recorded consent in the state directory. It only looks for the file:
+// an unknown state directory counts as recorded, so no note is printed on a guess.
+func consentRecorded(paths config.Paths) bool {
+	if paths.State == "" {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(paths.State, "consent.json"))
+	return err == nil
+}
+
+func printScheduleStatus(app *App, be schedule.Backend, paths config.Paths, jobs []schedule.Job) int {
 	out := make([]scheduleStatusJSON, 0, len(jobs))
 	text := []string{}
 	for _, j := range jobs {
@@ -110,16 +171,24 @@ func printScheduleStatus(app *App, be schedule.Backend, jobs []schedule.Job) int
 		if st.Installed {
 			w = append(w, schedule.EnvDrift(be, j)...)
 		}
-		out = append(out, scheduleStatusJSON{be.Name(), j.Label, st.Installed, w})
+		// A job installed before consent only produces dry runs (spec 14.7); only the run job is gated.
+		dry := st.Installed && j.Label == schedule.LabelRun && !consentRecorded(paths)
+		out = append(out, scheduleStatusJSON{be.Name(), j.Label, st.Installed, config.FormatInterval(j.Interval), st.Next, dry, w})
 		state := "not installed"
 		if st.Installed {
 			state = "installed"
 		}
-		line := fmt.Sprintf("%s: %s (%s)", j.Label, state, be.Name())
+		line := fmt.Sprintf("%s: %s (%s) every %s", j.Label, state, be.Name(), config.FormatInterval(j.Interval))
+		if st.Next != "" {
+			line += ", next run in " + st.Next
+		}
 		if st.Detail != "" {
 			line += " " + st.Detail
 		}
 		text = append(text, line)
+		if dry {
+			text = append(text, "  dry runs only: no consent recorded")
+		}
 		for _, x := range w {
 			text = append(text, "  warning: "+x)
 		}

@@ -21,9 +21,12 @@ const (
 	LabelRun   = "dev.sapulidi.run"
 	LabelAgent = "dev.sapulidi.agent"
 
-	runInterval   = 30 * time.Minute
 	agentInterval = 7 * 24 * time.Hour
 )
+
+// ParseInterval reads a schedule interval: <n>[s|m|h|d], a whole number of minutes from 5m to 7d. It does not
+// depend on the backend; the cron backend refuses what it cannot express when the job is installed.
+func ParseInterval(s string) (time.Duration, error) { return config.ParseScheduleInterval(s) }
 
 // Job is one scheduled command.
 type Job struct {
@@ -65,6 +68,7 @@ func EnvDrift(b Backend, j Job) []string {
 type Status struct {
 	Installed bool
 	Detail    string // next/last run, when the backend says
+	Next      string // time until the next run (e.g. "12m34s"), empty when the backend cannot tell
 	Warnings  []string
 }
 
@@ -76,7 +80,7 @@ type Backend interface {
 	Status(label string) (Status, error)
 }
 
-// Jobs returns the run job and the weekly agent job. The binary is always <data>/bin/current/sapulidi,
+// Jobs returns the run job (every schedule.interval) and the weekly agent job (unchanged by schedule.interval). The binary is always <data>/bin/current/sapulidi,
 // never the plugin cache path (which changes on plugin updates).
 func Jobs(p config.Paths) []Job {
 	bin := filepath.Join(p.Data, "bin", "current", "sapulidi")
@@ -86,7 +90,7 @@ func Jobs(p config.Paths) []Job {
 		return []EnvVar{{"SAPULIDI_CONFIG", p.Config}, {"SAPULIDI_STATE", p.State}, {"SAPULIDI_DATA", p.Data}}
 	}
 	return []Job{
-		{Label: LabelRun, Argv: []string{bin, "run", "--trigger", "schedule"}, Interval: runInterval,
+		{Label: LabelRun, Argv: []string{bin, "run", "--trigger", "schedule"}, Interval: config.ScheduleInterval(p),
 			LogPath: filepath.Join(p.State, "schedule-run.log"), Env: env()},
 		{Label: LabelAgent, Argv: []string{bin, "agent", "run", "--trigger", "schedule"}, Interval: agentInterval,
 			LogPath: filepath.Join(p.State, "schedule-agent.log"), Env: env()},

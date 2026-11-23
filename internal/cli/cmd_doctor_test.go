@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/als0x/sapulidi/internal/config"
@@ -60,6 +61,39 @@ func TestDoctorJSONShape(t *testing.T) {
 	if bytes.Contains(out.Bytes(), []byte("null")) {
 		t.Fatalf("null in %s", out.String())
 	}
+}
+
+func TestDoctorShowsTheScheduleInterval(t *testing.T) {
+	be := &fakeBackend{installed: map[string]bool{schedule.LabelRun: true, schedule.LabelAgent: true}}
+	p := useFake(t, be)
+	_ = config.Apply(p, config.Change{Key: "schedule.interval", Value: "2h"})
+	oldEnv := doctorEnv
+	doctorEnv = func() (core.Platform, core.Runner) {
+		run := &testutil.FakeRunner{Paths: map[string]string{}}
+		run.On([]string{"git", "--version"}, "git version 2.45.0\n", nil)
+		return &testutil.FakePlatform{OSName: "linux", Free: 100 << 30}, run
+	}
+	t.Cleanup(func() { doctorEnv = oldEnv })
+	var out, errb bytes.Buffer
+	if code := Main([]string{"--json", "doctor"}, &out, &errb); code != 0 {
+		t.Fatalf("%d %s", code, errb.String())
+	}
+	var doc struct {
+		Checks []struct{ Name, Detail string }
+	}
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range doc.Checks {
+		if c.Name == "scheduler" {
+			if !strings.Contains(c.Detail, schedule.LabelRun+": installed, every 2h") ||
+				!strings.Contains(c.Detail, schedule.LabelAgent+": installed, every 7d") {
+				t.Fatalf("detail %q", c.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("no scheduler check")
 }
 
 func TestDoctorWarnsWhenToolsAreMissing(t *testing.T) {
