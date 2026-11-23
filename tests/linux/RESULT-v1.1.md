@@ -1,59 +1,44 @@
 # Linux container suite: result (PRD LX2)
 
 Command: `bash tests/linux/run.sh` on the owner's Podman (rootless, arm64 host, Podman 5.6.2).
-Overall: **FAILED** (exit 2) in the Debian image, at `tests/sh/test_install.sh` under dash.
-The Alpine image passed.
+Overall: **passed** (`linux suite passed`, exit 0). One leg is **skipped**, not passed: install.sh under BusyBox ash.
 
 ## Images
 
 | Image | Size pulled | Existed before the run | Result |
 |---|---|---|---|
-| `docker.io/library/golang:1.26` (Debian, `/bin/sh` = dash) | 916,243,449 bytes | no | FAILED at install.sh under dash |
-| `docker.io/library/golang:1.26-alpine` (BusyBox, `/bin/sh` = ash) | 249,961,448 bytes | no | passed |
+| `docker.io/library/golang:1.26` (Debian, `/bin/sh` = dash) | 916,243,449 bytes | no | passed |
+| `docker.io/library/golang:1.26-alpine` (BusyBox, `/bin/sh` = ash) | 249,961,448 bytes | no | pty tests passed; install.sh **skipped** |
 
-Both images were removed afterwards with `podman rmi` (the run script does this for any image not present before
-the run). The other images in the owner's Podman were not touched.
+Both images were removed afterwards with `podman rmi`: the run script does this for any image that was not present
+before the run. The other images in the owner's Podman were not touched.
 
-## Debian pass (`inside.sh` → `as_user.sh`, user `user`, shell `/usr/bin/dash`)
+## Debian pass (`inside.sh` → `as_user.sh`, user `user`, `/bin/sh` = dash)
 
-- `bash tests/run.sh`: all checks passed (gofmt, vet for linux and darwin, `go test ./...`, the `tests/sh` suites;
-  `all 20 codex hook checks passed`, `all 29 hook checks passed`, `all checks passed` in test_launcher).
-- `sh tests/linux/pty_check.sh` (`go test -v ./internal/tui/... ./cmd/sapulidi/...`): the four pty tests passed and
-  did not skip: `TestPTYEnterRestore`, `TestPTYKeysAndSize`, `TestPTYSignalsRestoreAndExit`,
-  `TestTUIQuitsAndLeavesCookedMode`.
+- `bash tests/run.sh`: all checks passed (gofmt, vet for linux and darwin, `go test ./...`, the `tests/sh` suites:
+  20 codex hook checks, 29 hook checks, 74 install checks with 0 failed, 36 launcher checks with 0 failed).
+- `sh tests/linux/pty_check.sh` (`go test -v ./internal/tui/... ./cmd/sapulidi/...`): passed and not skipped:
+  `TestPTYEnterRestore`, `TestPTYKeysAndSize`, `TestPTYSignalsRestoreAndExit`, `TestTUIQuitsAndLeavesCookedMode`.
 - `bash tests/linux/scenario.sh`: `scenario passed` (old go-build and old node_modules removed; young ones kept; cron
-  entry installed; doctor ran; doctor warned about notify-send, the agent CLI and 7 GB free disk).
+  entry installed; doctor ran).
 - `bash tests/linux/tui_scenario.sh`: `tui scenario passed`
   - run 1: `q` leaves the stale folder in place, exit 0, `stty -a` shows `icanon` and `echo`;
   - run 2: space, `d`, `y`, `q`, `q`: the stale folder is removed, `keep.txt` stays, exit 0, `icanon` back.
-- `sh tests/sh/test_install.sh` under dash: **FAILED**.
+- `bash tests/sh/test_install.sh`: 74 checks, 0 failed. The harness is bash by design and runs `install.sh` with `sh`,
+  which is dash in this image, so install.sh was exercised under dash.
 
-```
-tests/sh/test_install.sh: 81: Syntax error: redirection unexpected
-```
+## Alpine pass (`inside_alpine.sh` → `alpine_user.sh`, user `user`, `/bin/sh` = BusyBox ash)
 
-Line 81 is `check "prints where and version" grep -q ... <<<"$out"`: a bash here-string. The file has a bash shebang and
-is written for bash. Under dash the whole suite stops there.
+- `sh tests/linux/pty_check.sh`: the same four pty tests passed and were not skipped.
+- install.sh: **skipped**. The harness needs bash and this image has none. Its own guard also skips when curl is
+  missing (`skip: curl missing`, exit 0), and this image has no curl. Nothing was installed in the container to work
+  around it. **install.sh was therefore not exercised under BusyBox ash in this run.**
 
-## Alpine pass (`inside_alpine.sh` → `alpine_user.sh`, user `user`, shell `/bin/busybox` = ash)
+## Changes in tests/linux
 
-- `sh tests/linux/pty_check.sh`: the same four pty tests passed and did not skip.
-- `sh tests/sh/test_install.sh` under ash: `ok 1` to `ok 7` shown, then `skip: curl missing` (the test's own skip,
-  it has no curl in the image), `alpine suite passed`.
-
-## Blocked
-
-`PRD LX2 BLOCKED: tests/sh/test_install.sh fails under dash: line 81 uses a bash here-string (<<<), dash: "Syntax
-error: redirection unexpected". Fix needs a change to tests/sh/test_install.sh, which LX2 does not own.`
-
-The PRD says to stop and report rather than fix a failure outside the owned files. The Debian pass therefore stops
-there. The `tests/linux/**` changes do not hide it: `as_user.sh` runs that check on purpose and the suite stays red.
-
-## What changed in tests/linux
-
-- `run.sh`: runs two images (Debian with `inside.sh`, Alpine with `inside_alpine.sh`). Removes an image only when it
+- `run.sh`: runs both images (Debian with `inside.sh`, Alpine with `inside_alpine.sh`). Removes an image only when it
   was not there before the run.
 - `pty_check.sh` (new): runs the pty tests and fails if one skips or does not pass.
 - `tui_scenario.sh` (new): the TUI in a pty with `script(1)`, the two runs described above.
-- `inside_alpine.sh`, `alpine_user.sh` (new): Alpine pass.
-- `as_user.sh`: adds the pty check, the TUI scenario and install.sh under dash.
+- `inside_alpine.sh`, `alpine_user.sh` (new): the Alpine pass.
+- `as_user.sh`: adds the pty check, the TUI scenario, and `bash tests/sh/test_install.sh`.

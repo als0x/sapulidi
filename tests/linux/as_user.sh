@@ -10,4 +10,5 @@ sh tests/linux/pty_check.sh
 bash tests/linux/scenario.sh
 bash tests/linux/tui_scenario.sh
 echo "shell: $(readlink -f /bin/sh)"
-sh tests/sh/test_install.sh
+# The harness is bash by design; it runs install.sh itself with sh, which is dash here.
+bash tests/sh/test_install.sh

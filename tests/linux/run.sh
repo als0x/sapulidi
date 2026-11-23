@@ -3,7 +3,7 @@
 # inside:
 #   golang:1.26 (Debian, /bin/sh is dash): tests/run.sh, the end-to-end scenario, the TUI scenario in a pty and
 #     install.sh under dash.
-#   golang:1.26-alpine (BusyBox, /bin/sh is ash): the pty tests and install.sh under ash.
+#   golang:1.26-alpine (BusyBox, /bin/sh is ash): the pty tests. install.sh is skipped there: the harness needs bash.
 # An image is removed afterwards unless KEEP_IMAGE=1 or it was already present before the run, so an image that was
 # there before is never touched. Needs podman. Exits non-zero on any failure.
 set -eu
