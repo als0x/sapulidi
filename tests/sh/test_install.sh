@@ -58,12 +58,15 @@ run() { # runs install.sh with the private PATH
 }
 
 rcsum() { cat "$H/.zshrc" "$H/.bashrc" | { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }; }
-nothing_left() { [ ! -e "$T/data/bin/0.1.0" ] && [ ! -e "$T/data/bin/current" ] && [ ! -e "$H/.local/bin/sapulidi" ]; }
+nothing_left() {
+	[ ! -e "$T/data/bin/0.1.0" ] && [ ! -e "$T/data/bin/current" ] && [ ! -e "$H/.local/bin/sapulidi" ] &&
+		[ -z "$(ls -A "$T/data/bin" 2>/dev/null | grep -e '^\.install' -e '^\.lock$')" ]
+}
 
 command -v curl >/dev/null || { echo "skip: curl missing"; exit 0; }
 check "sh -n" sh -n "$root/install.sh"
 if command -v shellcheck >/dev/null; then check "shellcheck" shellcheck -s sh "$root/install.sh"; fi
-check "at most 150 lines" test "$(wc -l <"$root/install.sh" | tr -d ' ')" -le 150
+check "at most 175 lines" test "$(wc -l <"$root/install.sh" | tr -d ' ')" -le 175
 check "pinned values" grep -q '^SAPULIDI_VERSION=0.1.0$' "$root/install.sh"
 
 # install, verify, link; rc files untouched
@@ -116,6 +119,7 @@ publish linux_amd64
 : >"$RAW/checksums.txt"
 out=$(run sh "$S" 2>&1); rc=$?
 check "missing checksum line exits 3" test "$rc" = 3
+check "missing checksum line message" grep -q 'no checksum line' <<<"$out"
 check "missing checksum installs nothing" nothing_left
 
 # checksums come from the raw base: the decoy in the release directory is ignored
@@ -139,8 +143,10 @@ new_env t7
 publish linux_amd64
 out=$(run env SAPULIDI_RELEASE_BASE=http://example.invalid/x sh "$S" 2>&1); rc=$?
 check "http release base exits 3" test "$rc" = 3
+check "http release base message" grep -q 'release base must be https' <<<"$out"
 out=$(run env SAPULIDI_RAW_BASE=http://example.invalid/x sh "$S" 2>&1); rc=$?
 check "http raw base exits 3" test "$rc" = 3
+check "http raw base message" grep -q 'raw base must be https' <<<"$out"
 check "http base installs nothing" nothing_left
 
 # no curl and no wget
@@ -149,7 +155,28 @@ publish linux_amd64
 rm -f "$P/curl"
 out=$(run sh "$S" 2>&1); rc=$?
 check "no tool exits 3" test "$rc" = 3
+check "no tool message" grep -q 'need curl or wget' <<<"$out"
 check "no tool installs nothing" nothing_left
+out=$(run sh "$S" --dry-run 2>&1); rc=$?
+check "dry run dies where the real run would" test "$rc" = 3
+
+# wget only: no --https-only (BusyBox), the shim logs its argv
+new_env t8b
+publish linux_amd64
+rm -f "$P/curl"
+printf '#!/bin/sh\necho "$*" >>"%s/wget.log"\ncat "${5#file://}" >"$2"\n' "$T" >"$P/wget"
+chmod +x "$P/wget"
+out=$(run sh "$S" 2>&1); rc=$?
+check "wget-only installs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+check "wget never gets --https-only" test -s "$T/wget.log" -a -z "$(grep -e https-only "$T/wget.log")"
+
+# no sha tool
+new_env t8c
+publish linux_amd64
+rm -f "$P/sha256sum" "$P/shasum"
+out=$(run sh "$S" 2>&1); rc=$?
+check "no sha tool exits 3" test "$rc" = 3
+check "no sha tool message" grep -q 'need sha256sum or shasum' <<<"$out"
 
 # root is refused
 new_env t9 Linux x86_64 0
@@ -157,6 +184,16 @@ publish linux_amd64
 out=$(run sh "$S" 2>&1); rc=$?
 check "root exits 1 with one line" test "$rc" = 1 -a "$(wc -l <<<"$out" | tr -d ' ')" = 1
 check "root installs nothing" nothing_left
+new_env t9b
+publish linux_amd64
+printf '#!/bin/sh\nexit 1\n' >"$P/id"
+out=$(run sh "$S" 2>&1); rc=$?
+check "failing id refuses" test "$rc" = 1
+check "failing id installs nothing" nothing_left
+rm "$P/id"
+out=$(run sh "$S" 2>&1); rc=$?
+check "missing id refuses" test "$rc" = 1
+check "missing id installs nothing" nothing_left
 
 # a foreign file or a foreign link at ~/.local/bin/sapulidi is refused
 new_env t10
@@ -170,6 +207,10 @@ rm "$H/.local/bin/sapulidi"
 ln -s /nonexistent/elsewhere "$H/.local/bin/sapulidi"
 out=$(run sh "$S" 2>&1); rc=$?
 check "foreign link refused" test "$rc" = 1 -a "$(readlink "$H/.local/bin/sapulidi")" = /nonexistent/elsewhere
+rm "$H/.local/bin/sapulidi"
+ln -s "$T/data/bin/../../elsewhere" "$H/.local/bin/sapulidi"
+out=$(run sh "$S" 2>&1); rc=$?
+check "link target with .. refused" test "$rc" = 1 -a "$(readlink "$H/.local/bin/sapulidi")" = "$T/data/bin/../../elsewhere"
 # a link into the data dir is replaced
 rm "$H/.local/bin/sapulidi"
 ln -s "$T/data/bin/0.0.1/sapulidi" "$H/.local/bin/sapulidi"
@@ -186,8 +227,51 @@ new_env t12
 publish linux_amd64
 out=$(run sh "$S" -- --bogus 2>&1); rc=$?
 check "unknown flag exits 2" test "$rc" = 2
-check "unknown flag is reported" grep -q 'unknown flag' <<<"$out"
+check "unknown flag is reported by the script" grep -q 'rejected these arguments' <<<"$out"
 check "unknown flag still installed" test -x "$T/data/bin/0.1.0/sapulidi"
+out=$(run sh "$S" -- ok 2>&1); rc=$?
+check "no rejection message when the binary exits 0" test "$rc" = 0 -a -z "$(grep 'rejected these' <<<"$out")"
+out=$(run sh "$S" --bogus 2>&1); rc=$?
+check "an unknown flag without -- is passed on and exits 2" test "$rc" = 2
+check "that rejection is reported by the script" grep -q 'rejected these arguments' <<<"$out"
+
+# arguments with spaces, an empty argument and a semicolon survive
+out=$(run sh "$S" -- --argv "a b" "" "x;y" 2>/dev/null)
+check "argv is passed intact" test "$(tail -n 3 <<<"$out")" = "$(printf '[a b]\n[]\n[x;y]')"
+
+# umask: restored before the link and the binary run
+new_env t12b
+publish linux_amd64
+out=$(run sh -c 'umask 022; exec sh "$0" -- --umask' "$S" 2>&1)
+check "binary runs with the caller's umask" test "$(tail -n 1 <<<"$out")" = 0022
+check ".local/bin is not 0700" test "$(ls -ld "$H/.local" | cut -c1-10)" != drwx------
+
+# stdin: the script piped into sh -s, binary does not eat it
+new_env t12c
+publish linux_amd64
+out=$(run sh -s -- --stdin <"$S" 2>&1); rc=$?
+check "sh -s < install.sh installs and runs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+check "binary gets no script on stdin" test "$(tail -n 1 <<<"$out")" = "stdin=[]"
+
+# checksum file shapes: CRLF ok, similar name ignored, conflicting duplicate refused, identical duplicate ok
+new_env t12d
+publish linux_amd64
+a=sapulidi_0.1.0_linux_amd64
+good=$(sha "$REL/$a")
+printf '%s  %s.sig\r\n%s  %s\r\n' 0000000000000000000000000000000000000000000000000000000000000000 "$a" "$good" "$a" >"$RAW/checksums.txt"
+out=$(run sh "$S" 2>&1); rc=$?
+check "CRLF checksums and a .sig line still install" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+new_env t12e
+publish linux_amd64
+printf '%s  %s\n%s  %s\n' 0000000000000000000000000000000000000000000000000000000000000000 "$a" "$good" "$a" >"$RAW/checksums.txt"
+out=$(run sh "$S" 2>&1); rc=$?
+check "conflicting duplicate line exits 3" test "$rc" = 3
+check "conflicting duplicate installs nothing" nothing_left
+new_env t12f
+publish linux_amd64
+printf '%s  %s\n%s  %s\n' "$good" "$a" "$good" "$a" >"$RAW/checksums.txt"
+out=$(run sh "$S" 2>&1); rc=$?
+check "identical duplicate line installs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
 
 # bin/current moves forward only
 new_env t13
@@ -196,6 +280,17 @@ mkdir -p "$T/data/bin/0.2.0"
 cp "$fixture/sapulidi" "$T/data/bin/0.2.0/sapulidi"; chmod +x "$T/data/bin/0.2.0/sapulidi"
 run sh "$S" >/dev/null 2>&1
 check "current is not moved back" test "$(readlink "$T/data/bin/current")" = 0.2.0
+out=$(run sh "$S" 2>&1)
+check "says which version will run" grep -q 'newer than 0.1.0; 0.2.0 will run' <<<"$out"
+
+# a non-executable current binary is refused
+new_env t13b
+publish linux_amd64
+mkdir -p "$T/data/bin/0.2.0"
+cp "$fixture/sapulidi" "$T/data/bin/0.2.0/sapulidi"; chmod 0644 "$T/data/bin/0.2.0/sapulidi"
+out=$(run sh "$S" 2>&1); rc=$?
+check "non-executable current exits 3" test "$rc" = 3
+check "non-executable current message" grep -q 'not an executable file' <<<"$out"
 
 # uname mapping
 new_env t14 Darwin arm64

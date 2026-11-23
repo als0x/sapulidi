@@ -16,12 +16,13 @@ while [ $# -gt 0 ]; do
 	case $1 in
 	--dry-run) dry=1 ;;
 	--) shift; break ;;
-	*) die 2 "unknown option: $1 (arguments for sapulidi go after --)" ;;
+	*) break ;; # sh -s -- args drops the "--": the first other argument starts the arguments for sapulidi
 	esac
 	shift
 done
 
-[ "$(id -u)" != 0 ] || die 1 "refusing to run as root; run it as your own user"
+uid=$(id -u 2>/dev/null)
+{ [ -n "$uid" ] && [ "$uid" != 0 ]; } || die 1 "refusing to run as root or without a user id; run it as your own user"
 case "$(uname -s)" in
 Darwin) os=darwin ;;
 Linux) os=linux ;;
@@ -46,21 +47,27 @@ bin=$dir/sapulidi
 link=$HOME/.local/bin/sapulidi
 base=${SAPULIDI_RELEASE_BASE:-https://github.com/$SAPULIDI_REPO/releases/download/v$SAPULIDI_VERSION}
 raw=${SAPULIDI_RAW_BASE:-https://raw.githubusercontent.com/$SAPULIDI_REPO/v$SAPULIDI_VERSION}
-for b in "$base" "$raw"; do
-	case $b in
+for b in "release:$base" "raw:$raw"; do
+	case ${b#*:} in
 	https://* | file://*) ;;
-	*) die 3 "bases must be https://: $b" ;;
+	*) die 3 "${b%%:*} base must be https://: ${b#*:}" ;;
 	esac
 done
+installed() { [ -f "$bin" ] && [ -x "$bin" ]; }
 
 if [ -e "$link" ] || [ -L "$link" ]; then
 	case $(readlink "$link" 2>/dev/null) in
+	*/../* | */..) die 1 "$link has a link target with '..'; move it away and run again" ;;
 	"$data"/*) ;;
 	*) die 1 "$link exists and is not a link into $data; move it away and run again" ;;
 	esac
 fi
+if ! installed; then
+	command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || die 3 "need curl or wget"
+	command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || die 3 "need sha256sum or shasum"
+fi
 
-if [ -x "$bin" ]; then
+if installed; then
 	say "$SAPULIDI_VERSION is already installed at $bin; nothing to download"
 else
 	say "will download $base/$asset"
@@ -81,7 +88,8 @@ fetch() { # url dest
 	if command -v curl >/dev/null 2>&1; then
 		curl -fsSL --proto '=https,file' --proto-redir '=https' --connect-timeout 15 --max-time 300 -o "$2" "$1"
 	else
-		wget -qO "$2" --https-only -T 30 "$1"
+		# BusyBox wget has no --https-only, so wget cannot refuse an https to http redirect; curl is preferred.
+		wget -qO "$2" -T 30 "$1"
 	fi
 }
 
@@ -92,8 +100,9 @@ sha256() {
 install_binary() {
 	tmp=$(mktemp -d "$bindir/.install.XXXXXX") || die 3 "cannot create a temp directory in $bindir"
 	fetch "$raw/checksums.txt" "$tmp/checksums.txt" || die 3 "download failed: $raw/checksums.txt"
-	want=$(awk -v a="$asset" '$2 == a { print $1; exit }' "$tmp/checksums.txt")
+	want=$(awk -v a="$asset" '{ sub(/\r$/, "") } $2 == a { print $1 }' "$tmp/checksums.txt" | sort -u)
 	[ -n "$want" ] || die 3 "no checksum line for $asset in $raw/checksums.txt"
+	[ "$(echo "$want" | grep -c .)" = 1 ] || die 3 "conflicting checksum lines for $asset in $raw/checksums.txt"
 	fetch "$base/$asset" "$tmp/$asset" || die 3 "download failed: $base/$asset"
 	[ "$(sha256 "$tmp/$asset")" = "$want" ] || die 3 "checksum mismatch for $asset"
 	chmod 0755 "$tmp/$asset" && mkdir -p "$dir" && mv -f "$tmp/$asset" "$bin" || die 3 "cannot install $bin"
@@ -112,10 +121,9 @@ update_current() {
 	fi
 }
 
+oldumask=$(umask)
 umask 077
-if [ ! -x "$bin" ]; then
-	command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || die 3 "need curl or wget"
-	command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || die 3 "need sha256sum or shasum"
+if ! installed; then
 	[ ! -L "$bindir" ] && [ ! -L "$dir" ] || die 3 "refusing symlinked directory under $data"
 	mkdir -p "$bindir" || die 3 "cannot create $bindir"
 	waited=0
@@ -124,16 +132,20 @@ if [ ! -x "$bin" ]; then
 			locked=1
 			break
 		fi
-		[ -x "$bin" ] && break
+		installed && break
 		if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] && rmdir "$lock" 2>/dev/null; then continue; fi
 		sleep 1
 		waited=$((waited + 1))
 		[ "$waited" -le "${SAPULIDI_LOCK_WAIT:-700}" ] || die 3 "timed out waiting for $lock"
 	done
-	[ -x "$bin" ] || install_binary
+	installed || install_binary
 	if [ "$locked" = 1 ]; then rmdir "$lock" 2>/dev/null; locked=0; fi
 fi
 update_current
+umask "$oldumask"
+cur=$(readlink "$bindir/current" 2>/dev/null)
+[ -f "$bindir/current/sapulidi" ] && [ -x "$bindir/current/sapulidi" ] || die 3 "$bindir/current/sapulidi is not an executable file"
+[ "$cur" = "$SAPULIDI_VERSION" ] || say "current points at $cur, newer than $SAPULIDI_VERSION; $cur will run"
 mkdir -p "$HOME/.local/bin" && rm -f "$link" && ln -s "$bindir/current/sapulidi" "$link" || die 1 "cannot link $link"
 
 say "installed $bin (version $SAPULIDI_VERSION), linked as $link"
@@ -143,7 +155,8 @@ case ":${PATH:-}:" in
 esac
 
 if [ $# -gt 0 ]; then
-	if [ -t 0 ]; then "$bin" "$@"; else "$bin" "$@" </dev/null; fi
+	run=$bindir/current/sapulidi
+	if [ -t 0 ]; then "$run" "$@"; else "$run" "$@" </dev/null; fi
 	rc=$?
 	[ "$rc" != 2 ] || echo "sapulidi: the installed binary rejected these arguments (exit 2)" >&2
 	exit "$rc"

@@ -1,4 +1,15 @@
 #!/bin/sh
+# Fake binary: --bogus exits 2, --umask prints the umask, --stdin prints one line of stdin,
+# --argv prints every argument in brackets, one per line.
+case "${1:-}" in
+--umask) umask; exit 0 ;;
+--stdin) read -r l; echo "stdin=[$l]"; exit 0 ;;
+--argv)
+	shift
+	for a in "$@"; do echo "[$a]"; done
+	exit 0
+	;;
+esac
 for a in "$@"; do
 	if [ "$a" = --bogus ]; then
 		echo "unknown flag: $a" >&2
