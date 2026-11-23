@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/als0x/sapulidi/internal/install"
 )
 
 // recordCommands replaces agents and schedule with recording fakes; the returned slice
@@ -52,6 +54,10 @@ func TestFrontMappings(t *testing.T) {
 		{[]string{"--agents", "claude", "--schedule", "30m"}, []string{"agents install claude", "schedule install --every 30m"}},
 		{[]string{"--schedule", "off", "--agents", "codex"}, []string{"schedule remove", "agents install codex"}},
 		{[]string{"--json", "--agents", "cursor"}, []string{"agents install cursor"}},
+		{[]string{"--agents=claude"}, []string{"agents install claude"}},
+		{[]string{"--agents=all", "--remove"}, []string{"agents remove all"}},
+		{[]string{"--schedule=30m"}, []string{"schedule install --every 30m"}},
+		{[]string{"--schedule=off"}, []string{"schedule remove"}},
 	}
 	for _, c := range cases {
 		calls := recordCommands(t, nil)
@@ -76,6 +82,47 @@ func TestFrontStopsAtFirstFailure(t *testing.T) {
 	code, _, _ := runFront(t, "--agents", "claude", "--schedule", "30m")
 	if code != 1 || len(*calls) != 1 {
 		t.Errorf("code %d calls %v", code, *calls)
+	}
+}
+
+func TestFrontFailureInOtherPositions(t *testing.T) {
+	calls := recordCommands(t, map[string]int{"schedule": 2})
+	code, _, _ := runFront(t, "--schedule", "bogus", "--agents", "claude")
+	if code != 2 || strings.Join(*calls, "|") != "schedule install --every bogus" {
+		t.Errorf("code %d calls %v", code, *calls)
+	}
+	calls = recordCommands(t, map[string]int{"schedule": 1})
+	code, _, _ = runFront(t, "--agents", "claude", "--schedule", "30m")
+	if code != 1 || len(*calls) != 2 {
+		t.Errorf("code %d calls %v", code, *calls)
+	}
+}
+
+func TestFrontHelpDiscardsOtherFlags(t *testing.T) {
+	calls := recordCommands(t, nil)
+	code, out, _ := runFront(t, "--agents", "claude", "--help", "--schedule", "30m")
+	if code != 0 || len(*calls) != 0 || !strings.Contains(out, "flags:") {
+		t.Errorf("code %d calls %v", code, *calls)
+	}
+}
+
+func TestFrontJSONRefusesSeveralSteps(t *testing.T) {
+	calls := recordCommands(t, nil)
+	code, out, errs := runFront(t, "--json", "--agents", "claude", "--schedule", "30m")
+	if code != 2 || len(*calls) != 0 || out != "" || errs == "" {
+		t.Errorf("code %d calls %v out %q err %q", code, *calls, out, errs)
+	}
+}
+
+func TestFrontHostsComeFromInstallTable(t *testing.T) {
+	got := frontHosts()
+	if len(got) != len(install.Hosts) {
+		t.Fatalf("%v vs install.Hosts", got)
+	}
+	for i, h := range install.Hosts {
+		if got[i] != h.Name {
+			t.Errorf("%d: %s != %s", i, got[i], h.Name)
+		}
 	}
 }
 

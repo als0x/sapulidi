@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -9,19 +10,16 @@ import (
 // TUI is assigned by the TUI package (T3) in init(); nil means no interactive screen in this build.
 var TUI func(app *App) int
 
-// isTerminal reports whether stdin and stdout are both terminals.
+// isTerminal reports whether the app writes to the process stdout and both stdin and stdout are terminals.
 var isTerminal = func(app *App) bool {
-	f, ok := app.Stdout.(*os.File)
-	return ok && charDevice(os.Stdin) && charDevice(f)
+	if app.Stdout != io.Writer(os.Stdout) {
+		return false
+	}
+	return fdIsTTY(os.Stdin.Fd()) && fdIsTTY(os.Stdout.Fd())
 }
 
-func charDevice(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
-// frontHosts are the names `--agents` accepts, besides "all".
-var frontHosts = []string{"claude", "codex", "cursor", "antigravity", "opencode", "pi"}
+// frontHosts are the names `--agents` accepts, besides "all"; the install table is the source.
+func frontHosts() []string { return hostNames() }
 
 type frontStep struct {
 	command string
@@ -40,30 +38,36 @@ func noArgs(app *App) int {
 
 // parseFront turns leading flags into steps; nothing runs unless the whole line is valid.
 func parseFront(args []string) (steps []frontStep, help bool, err error) {
-	valueAt := func(i int) (string, bool) {
-		if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-			return args[i+1], true
+	hosts := frontHosts()
+	// valueAt returns the value of the flag at i: its "=value" part, or the next argument when that is not a flag.
+	valueAt := func(i int) (v string, ok bool, used int) {
+		if _, after, found := strings.Cut(args[i], "="); found {
+			return after, true, 0
 		}
-		return "", false
+		if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			return args[i+1], true, 1
+		}
+		return "", false, 0
 	}
 	lastAgents := -1 // index into steps of an --agents install that --remove may still flip
 	for i := 0; i < len(args); i++ {
-		switch a := args[i]; a {
+		flag, _, _ := strings.Cut(args[i], "=")
+		switch flag {
 		case "--help", "-h":
 			help = true
 		case "--agents":
 			lastAgents = -1
-			name, ok := valueAt(i)
+			name, ok, used := valueAt(i)
 			if !ok {
 				steps = append(steps, frontStep{command: "agents"})
 				continue
 			}
-			i++
+			i += used
 			if name == "auto" {
-				return nil, false, fmt.Errorf("sapulidi: --agents auto is not accepted; name a host (%s) or all", strings.Join(frontHosts, ", "))
+				return nil, false, fmt.Errorf("sapulidi: --agents auto is not accepted; name a host (%s) or all", strings.Join(hosts, ", "))
 			}
-			if name != "all" && !contains(frontHosts, name) {
-				return nil, false, fmt.Errorf("sapulidi: --agents: unknown name %q (valid: %s, all)", name, strings.Join(frontHosts, ", "))
+			if name != "all" && !contains(hosts, name) {
+				return nil, false, fmt.Errorf("sapulidi: --agents: unknown name %q (valid: %s, all)", name, strings.Join(hosts, ", "))
 			}
 			steps = append(steps, frontStep{command: "agents", args: []string{"install", name}})
 			lastAgents = len(steps) - 1
@@ -75,19 +79,18 @@ func parseFront(args []string) (steps []frontStep, help bool, err error) {
 			lastAgents = -1
 		case "--schedule":
 			lastAgents = -1
-			v, ok := valueAt(i)
+			v, ok, used := valueAt(i)
+			i += used
 			switch {
 			case !ok:
 				steps = append(steps, frontStep{command: "schedule", args: []string{"status"}})
 			case v == "off":
-				i++
 				steps = append(steps, frontStep{command: "schedule", args: []string{"remove"}})
 			default:
-				i++
 				steps = append(steps, frontStep{command: "schedule", args: []string{"install", "--every", v}})
 			}
 		default:
-			return nil, false, fmt.Errorf("sapulidi: unknown flag or command %q", a)
+			return nil, false, fmt.Errorf("sapulidi: unknown flag or command %q", args[i])
 		}
 	}
 	return steps, help, nil
@@ -113,6 +116,10 @@ func runFlags(app *App, args []string) int {
 	if help {
 		return runHelp(app, nil)
 	}
+	if app.JSON && len(steps) > 1 {
+		fmt.Fprintln(app.Stderr, "sapulidi: --json prints one document per call; give one flag at a time")
+		return 2
+	}
 	for _, s := range steps {
 		c, ok := commands[s.command]
 		if !ok {
@@ -132,7 +139,7 @@ func frontHelp(app *App) {
 	fmt.Fprintln(app.Stdout, "  --help, -h              show this help")
 	fmt.Fprintln(app.Stdout, "  --json                  print one JSON document")
 	fmt.Fprintln(app.Stdout, "  --agents                list agent tools")
-	fmt.Fprintf(app.Stdout, "  --agents <name>|all     install sapulidi into an agent tool (%s)\n", strings.Join(frontHosts, ", "))
+	fmt.Fprintf(app.Stdout, "  --agents <name>|all     install sapulidi into an agent tool (%s)\n", strings.Join(frontHosts(), ", "))
 	fmt.Fprintln(app.Stdout, "  --agents <name>|all --remove   remove it again")
 	fmt.Fprintln(app.Stdout, "  --schedule <interval>   install the scheduled run, for example 30m")
 	fmt.Fprintln(app.Stdout, "  --schedule off          remove the scheduled run")
