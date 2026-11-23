@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -94,7 +95,7 @@ func (l *List) Add(p, note string, now time.Time) (added bool, by string, err er
 		return false, "", err
 	}
 	for _, e := range l.entries {
-		if covers(e.Path, stored) {
+		if anyForm(e.Path, []string{stored}, covers) {
 			return false, e.Path, nil
 		}
 	}
@@ -104,12 +105,12 @@ func (l *List) Add(p, note string, now time.Time) (added bool, by string, err er
 
 // Remove deletes the entry stored for p; an unknown path is an error.
 func (l *List) Remove(p string) error {
-	want := map[string]bool{p: true, filepath.Clean(p): true}
+	want := []string{filepath.Clean(p)}
 	if n, err := normalise(p); err == nil {
-		want[n] = true
+		want = append(want, n)
 	}
 	for i, e := range l.entries {
-		if want[e.Path] {
+		if anyForm(e.Path, want, sameSegs) {
 			l.entries = append(l.entries[:i:i], l.entries[i+1:]...)
 			return nil
 		}
@@ -117,15 +118,42 @@ func (l *List) Remove(p string) error {
 	return fmt.Errorf("%s is not excluded", p)
 }
 
+// forms are the spellings of a path that count: its lexical form (cleaned) and its real form (symlinks
+// resolved). An entry hand-written as /tmp/x protects /private/tmp/x and the other way round.
+func forms(p string) []string {
+	c := filepath.Clean(p)
+	if r := realPath(c); r != c {
+		return []string{c, r}
+	}
+	return []string{c}
+}
+
+// anyForm reports whether rel holds between any form of entry and any of the given candidate forms.
+func anyForm(entry string, cands []string, rel func(entry, cand string) bool) bool {
+	for _, e := range forms(entry) {
+		for _, c := range cands {
+			if rel(e, c) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sameSegs(a, b string) bool { return covers(a, b) && covers(b, a) }
+
 // Match reports whether the candidate path must be kept: it is an excluded path, below one, or contains one.
-// matched is the entry's stored path. The candidate is compared by its real path.
+// matched is the entry's path as stored. Both the lexical form and the real form of the candidate are
+// checked, so a symlink inside an excluded folder is kept even when it points elsewhere.
+// Matching ignores case: it can only keep more, never less. A non-absolute candidate never matches
+// (guard.Excluded refuses those itself).
 func (l *List) Match(candidate string) (matched string, ok bool) {
 	if l == nil || !filepath.IsAbs(candidate) {
 		return "", false
 	}
-	c := realPath(candidate)
+	cs := forms(candidate)
 	for _, e := range l.entries {
-		if covers(e.Path, c) || contains(e.Path, c) {
+		if anyForm(e.Path, cs, covers) || anyForm(e.Path, cs, contains) {
 			return e.Path, true
 		}
 	}
@@ -137,13 +165,36 @@ func (l *List) Within(candidate string) (matched string, ok bool) {
 	if l == nil || !filepath.IsAbs(candidate) {
 		return "", false
 	}
-	c := realPath(candidate)
+	cs := forms(candidate)
 	for _, e := range l.entries {
-		if covers(e.Path, c) {
+		if anyForm(e.Path, cs, covers) {
 			return e.Path, true
 		}
 	}
 	return "", false
+}
+
+// Update takes an exclusive lock on <config dir>/exclude.lock, loads the list afresh, runs fn (which
+// changes the list and calls Save) and unlocks, so two writers never lose each other's entries.
+func Update(p config.Paths, fn func(l *List) error) error {
+	dir := filepath.Dir(p.Config)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "exclude.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	l, err := Load(p)
+	if err != nil {
+		return err
+	}
+	return fn(l)
 }
 
 // realPath resolves symlinks in the existing part of p and appends the rest unchanged.

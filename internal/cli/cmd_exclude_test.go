@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/als0x/sapulidi/internal/confirm"
@@ -79,6 +80,34 @@ func TestExcludeAddListRemove(t *testing.T) {
 	withTerminal(t, true, "remove\n")
 	if code, _, _ := runCLI(t, "exclude", "--remove", dir); code != 1 {
 		t.Fatalf("unknown: %d", code)
+	}
+}
+
+func TestExcludeConcurrentAddsKeepAll(t *testing.T) {
+	home := testutil.TempHome(t)
+	const n = 8
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		d := filepath.Join(home, "p", string(rune('a'+i)))
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var out, errb bytes.Buffer
+			if code := Main([]string{"exclude", d}, &out, &errb); code != 0 {
+				t.Errorf("%d %s", code, errb.String())
+			}
+		}()
+	}
+	wg.Wait()
+	_, out, _ := runCLI(t, "exclude", "--list", "--json")
+	var doc struct {
+		Exclusions []struct{ Path string } `json:"exclusions"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || len(doc.Exclusions) != n {
+		t.Fatalf("%d entries (%v), want %d: %s", len(doc.Exclusions), err, n, out)
 	}
 }
 

@@ -1,6 +1,8 @@
 package guard
 
 import (
+	"path/filepath"
+
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/exclude"
 )
@@ -11,6 +13,11 @@ import (
 func Excluded(list *exclude.List, c core.Candidate) error {
 	if list == nil {
 		return nil
+	}
+	for _, p := range []string{c.Path, c.Base} {
+		if p != "" && !filepath.IsAbs(p) {
+			return core.Keep("excluded", "path is not absolute: "+p)
+		}
 	}
 	if c.Path != "" {
 		if m, ok := list.Match(c.Path); ok {

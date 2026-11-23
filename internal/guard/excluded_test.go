@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,22 @@ func TestExcluded(t *testing.T) {
 		if !errors.As(err, &ke) || ke.Why != "excluded" || ke.Detail != real {
 			t.Errorf("%s: got %v, want Keep(excluded, %s)", c.name, err, real)
 		}
+	}
+	for _, c := range []core.Candidate{{Path: "rel/keep"}, {Path: real, Base: "rel"}} {
+		var ke *core.KeepError
+		if err := Excluded(list, c); !errors.As(err, &ke) || ke.Why != "excluded" || !strings.Contains(ke.Detail, "not absolute") {
+			t.Errorf("relative %+v: %v", c, err)
+		}
+	}
+	link := filepath.Join(real, "link")
+	if err := os.Symlink(other, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := Excluded(list, core.Candidate{Path: link, Base: nm}); err == nil {
+		t.Error("a link inside an excluded folder must be kept")
+	}
+	if err := Excluded(list, core.Candidate{Path: other, Base: link}); err == nil {
+		t.Error("a base reached through a link inside an excluded folder must be kept")
 	}
 	if err := Excluded(nil, core.Candidate{Path: real}); err != nil {
 		t.Errorf("nil list: %v", err)

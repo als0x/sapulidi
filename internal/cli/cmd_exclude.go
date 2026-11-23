@@ -51,17 +51,27 @@ func runExclude(app *App, args []string) int {
 	if err != nil {
 		return fail(app, "exclude", err)
 	}
-	l, err := exclude.Load(paths)
-	if err != nil {
-		return fail(app, "exclude", err)
-	}
 	switch {
 	case list:
+		l, err := exclude.Load(paths)
+		if err != nil {
+			return fail(app, "exclude", err)
+		}
 		return listExclusions(app, l)
 	case remove:
-		return removeExclusion(app, l, path)
+		return removeExclusion(app, paths, path)
 	}
-	added, by, err := l.Add(path, note, time.Now())
+	var added bool
+	var by, stored string
+	err = exclude.Update(paths, func(l *exclude.List) error {
+		var err error
+		added, by, err = l.Add(path, note, time.Now())
+		if err != nil || !added {
+			return err
+		}
+		stored = l.Entries()[len(l.Entries())-1].Path
+		return l.Save()
+	})
 	if err != nil {
 		return fail(app, "exclude", err)
 	}
@@ -73,10 +83,6 @@ func runExclude(app *App, args []string) int {
 		}
 		return 0
 	}
-	if err := l.Save(); err != nil {
-		return fail(app, "exclude", err)
-	}
-	stored := l.Entries()[len(l.Entries())-1].Path
 	if app.JSON {
 		writeJSON(app.Stdout, map[string]any{"added": true, "path": stored})
 	} else {
@@ -105,7 +111,7 @@ func listExclusions(app *App, l *exclude.List) int {
 	return 0
 }
 
-func removeExclusion(app *App, l *exclude.List, path string) int {
+func removeExclusion(app *App, paths config.Paths, path string) int {
 	// Terminal tier (S15): taking a protection away is the user's own act, retyped in a real terminal.
 	err := confirm.Terminal("This lets sapulidi touch "+safeText(path)+" again.\nType remove to continue: ", "remove")
 	switch {
@@ -121,11 +127,15 @@ func removeExclusion(app *App, l *exclude.List, path string) int {
 	case err != nil:
 		return fail(app, "exclude", err)
 	}
-	if err := l.Remove(path); err != nil {
+	// Load afresh under the lock only now: the confirmation can block for a long time.
+	err = exclude.Update(paths, func(l *exclude.List) error {
+		if err := l.Remove(path); err != nil {
+			return err
+		}
+		return l.Save()
+	})
+	if err != nil {
 		return fail(app, "exclude", errors.New(safeText(err.Error())))
-	}
-	if err := l.Save(); err != nil {
-		return fail(app, "exclude", err)
 	}
 	if app.JSON {
 		writeJSON(app.Stdout, map[string]any{"removed": path})
