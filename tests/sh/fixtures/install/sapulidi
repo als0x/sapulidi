@@ -1,0 +1,8 @@
+#!/bin/sh
+for a in "$@"; do
+	if [ "$a" = --bogus ]; then
+		echo "unknown flag: $a" >&2
+		exit 2
+	fi
+done
+echo "fake sapulidi $*"
