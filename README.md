@@ -19,6 +19,40 @@ Nothing runs unverified.
 | Antigravity | install the plugin from this repository (`.antigravity-plugin/`) |
 | OpenCode, Pi | clone the repository and link `skills/sapulidi` into the skill directory; see `.opencode/INSTALL.md` and `.pi/INSTALL.md` |
 
+### Install from a terminal
+
+`install.sh` fetches the binary of one pinned version, verifies it and links it into `~/.local/bin`. Pin the URL to
+a tag, and read the script first if you like:
+
+```
+curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.2.0/install.sh -o install.sh
+less install.sh
+sh install.sh
+```
+
+Or in one line; everything after `--` goes to `sapulidi`:
+
+```
+curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.2.0/install.sh | sh -s -- [flags]
+```
+
+Flags: `--agents <name>|all` installs sapulidi into an agent tool (add `--remove` to undo), `--schedule 30m` installs
+the scheduled run (`--schedule off` removes it, `--schedule` alone shows it), for example
+`... | sh -s -- --agents claude --schedule 30m`. `sh install.sh --dry-run` shows what it would do.
+
+## The TUI
+
+Run `sapulidi` with no arguments in a terminal. It scans, lists what it found by category and size, and lets you
+pick what to delete; every deletion still goes through the engine and its safety checks. Keys: `up`/`down` move,
+`enter` detail, `space` select, `a` select all, `d` delete the selection, `x` exclude, `o` show optional
+categories, `/` search, `s` sort, `esc` back, `q` quit. It is for a person in a terminal; an agent uses `plan`
+and `report`.
+
+## Exclusions
+
+`sapulidi exclude <path> [--note text]` makes sapulidi never touch that path (the same as `x` in the TUI);
+`sapulidi exclude --list` shows them and `sapulidi exclude --remove <path>` needs a terminal.
+
 ## First run
 
 Start a session; sapulidi says it is not set up. Run:
@@ -61,9 +95,10 @@ applying one goes through the same guards as any removal.
 
 ## Verify a binary
 
-Version 0.1.0 was built locally with `scripts/release.sh` (reproducible flags `-trimpath -buildvcs=false`,
-`CGO_ENABLED=0`) and has no build provenance attestation; the launcher checks every download against the
-`checksums.txt` committed in this repository. Releases built by GitHub Actions from a tag carry an attestation too:
+Releases built by GitHub Actions from a tag carry a build provenance attestation. Version 0.1.0, and any release
+built locally with `scripts/release.sh` (reproducible flags `-trimpath -buildvcs=false`, `CGO_ENABLED=0`), do not;
+the launcher and `install.sh` check every download against the `checksums.txt` committed in this repository
+either way. To check an attestation:
 
 ```
 gh attestation verify sapulidi_<version>_<os>_<arch> --repo <owner>/sapulidi

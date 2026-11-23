@@ -57,6 +57,88 @@ func TestManifestVersionsMatch(t *testing.T) {
 	}
 }
 
+// pinned reads the SAPULIDI_VERSION line of a shell file.
+func pinned(t *testing.T, rel string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(), rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if v, ok := strings.CutPrefix(line, "SAPULIDI_VERSION="); ok {
+			return v
+		}
+	}
+	t.Fatalf("%s has no SAPULIDI_VERSION line", rel)
+	return ""
+}
+
+// The release script rewrites the manifests, bin/sapulidi and install.sh together (0.2.0 at the v1.1 release);
+// at every commit they must pin one version.
+func TestInstallScriptAndLauncherPinManifestVersion(t *testing.T) {
+	want := readManifest(t, ".claude-plugin/plugin.json").Version
+	for _, rel := range []string{"install.sh", "bin/sapulidi"} {
+		if got := pinned(t, rel); got != want {
+			t.Errorf("%s pins %s, manifests say %s", rel, got, want)
+		}
+	}
+}
+
+func TestReleaseScriptBumpsEveryPin(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "scripts/release.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, w := range []string{"install.sh", "bin/sapulidi", "SAPULIDI_VERSION"} {
+		if !strings.Contains(text, w) {
+			t.Errorf("release.sh does not mention %q", w)
+		}
+	}
+	// checksums.txt is written before the suite runs (the 0.1.0 order left main red).
+	sum := strings.Index(text, "sha256sum sapulidi_*")
+	suite := strings.LastIndex(text, "bash tests/run.sh")
+	if sum < 0 || suite < sum {
+		t.Error("release.sh must write checksums.txt before it runs tests/run.sh")
+	}
+}
+
+func TestReadmeCoversInstallAndTUI(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"TUI", "--agents", "--schedule", "install.sh", "exclude", "attestation"} {
+		if !strings.Contains(string(data), w) {
+			t.Errorf("README.md does not mention %q", w)
+		}
+	}
+}
+
+func TestSkillMentionsV11Features(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "skills/sapulidi/SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"TUI", "exclude", "--schedule", "agents", "Explicit"} {
+		if !strings.Contains(string(data), w) {
+			t.Errorf("SKILL.md does not mention %q", w)
+		}
+	}
+}
+
+func TestKnownLimitsListV11(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "docs/known-limits.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"exclude.toml", "not a sandbox", "statx", "fake a terminal"} {
+		if !strings.Contains(string(data), w) {
+			t.Errorf("known-limits.md does not mention %q", w)
+		}
+	}
+}
+
 func TestSkillSizeLimits(t *testing.T) {
 	root := repoRoot()
 	check := func(rel string, limit int) {

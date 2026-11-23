@@ -39,6 +39,21 @@ unattended; each is a disk leak, a missing hardening step or an accepted limit.
 - Ignored files inside a linked worktree are deleted with it (S9 protects tracked, untracked, stashed and unpushed
   work, not ignored files); this is an accepted decision.
 
+## Added in v1.1
+
+- `exclude.toml`: an agent with a file-write tool can edit it directly. Removing an exclusion through the CLI is
+  terminal tier, but the file itself is not protected; the host's tool permissions are the barrier.
+- The TUI is not a sandbox. It is a screen for a person in a terminal; what it deletes still goes through the engine
+  and its guards, but anything that can drive the terminal can drive the TUI.
+- `statx` birth time can be unknown on some filesystems. It only feeds the age column of the TUI; no deletion
+  decision uses it (those use the newest change time inside the path). When it is unknown the column shows `-` and
+  sorts last, and nothing else changes.
+- Containers, image prune and builder prune rows are shown in the TUI but are report-only: they are never
+  selectable, because the engine has no path identity for a container candidate (only the rm command). The TUI never
+  removes a container. They are removed by the scheduled run, or by `docker rm` or `podman rm`.
+- A pty-driving agent can fake a terminal, so the terminal tier (including `Explicit` runs and the TUI) rests on the
+  host's permission prompts, as before.
+
 ## Auto-bucket proofs (audit after FR1 M1)
 
 Every auto category and what its proof is, so no auto rule rests on a name or an age alone:
