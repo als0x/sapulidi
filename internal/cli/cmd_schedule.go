@@ -12,6 +12,7 @@ import (
 	"github.com/als0x/sapulidi/internal/execx"
 	"github.com/als0x/sapulidi/internal/platform"
 	"github.com/als0x/sapulidi/internal/schedule"
+	"github.com/als0x/sapulidi/internal/state"
 )
 
 // scheduleSetup resolves the backend and the paths; tests replace it.
@@ -93,6 +94,17 @@ func runSchedule(app *App, args []string) int {
 		fmt.Fprintf(app.Stderr, "sapulidi: schedule: %v\n", err)
 		return 1
 	}
+	if action == "install" && paths.Config != "" {
+		// A config that cannot be read would silently install at the default interval: refuse instead.
+		cfg, _, err := config.Load(paths.Config)
+		if err == nil && len(cfg.Invalid) > 0 {
+			err = fmt.Errorf("not valid TOML: %s", strings.Join(cfg.Invalid, ", "))
+		}
+		if err != nil {
+			fmt.Fprintf(app.Stderr, "sapulidi: schedule install: the config cannot be read, nothing installed: %v\n", err)
+			return 1
+		}
+	}
 	var all, jobs []schedule.Job
 	all = schedule.Jobs(paths)
 	for _, j := range all {
@@ -111,21 +123,34 @@ func runSchedule(app *App, args []string) int {
 	}
 	switch action {
 	case "install":
+		// The new interval is stored before anything is installed, so a store that fails installs nothing and a
+		// later bare install can never revert what the scheduler runs. A failed install puts the old value back.
+		undo := func() {}
+		if hasEvery {
+			prev, had, err := config.AppliedScheduleInterval(paths)
+			if err == nil {
+				err = config.Apply(paths, config.Change{Key: "schedule.interval", Value: every})
+			}
+			if err != nil {
+				fmt.Fprintf(app.Stderr, "sapulidi: schedule install: %v\n", err)
+				return 1
+			}
+			undo = func() {
+				if err := config.RestoreScheduleInterval(paths, prev, had); err != nil {
+					fmt.Fprintf(app.Stderr, "sapulidi: schedule install: could not restore the previous interval: %v\n", err)
+				}
+			}
+		}
 		for _, j := range jobs {
 			if err := os.MkdirAll(filepath.Dir(j.LogPath), 0o700); err != nil {
+				undo()
 				fmt.Fprintf(app.Stderr, "sapulidi: schedule: %v\n", err)
 				return 1
 			}
 			if err := be.Install(j); err != nil {
+				undo()
 				fmt.Fprintf(app.Stderr, "sapulidi: schedule install %s: %v\n", j.Label, err)
 				return 1
-			}
-			// Stored only once the backend accepted the interval, so a refusal keeps the old value.
-			if hasEvery && j.Label == schedule.LabelRun {
-				if err := config.Apply(paths, config.Change{Key: "schedule.interval", Value: every}); err != nil {
-					fmt.Fprintf(app.Stderr, "sapulidi: schedule install: %v\n", err)
-					return 1
-				}
 			}
 			if !app.JSON {
 				fmt.Fprintf(app.Stdout, "installed %s (%s), every %s\n", j.Label, be.Name(), config.FormatInterval(j.Interval))
@@ -148,14 +173,19 @@ func runSchedule(app *App, args []string) int {
 	return 0
 }
 
-// consentRecorded reports whether setup has recorded consent in the state directory. It only looks for the file:
-// an unknown state directory counts as recorded, so no note is printed on a guess.
+// consentRecorded reports whether setup recorded a readable consent. Like a run, it fails closed: a missing state
+// directory, an unreadable, empty or corrupt consent file all count as no consent. A state directory that does
+// not exist yet is not created.
 func consentRecorded(paths config.Paths) bool {
-	if paths.State == "" {
-		return true
+	if _, err := os.Stat(paths.State); err != nil {
+		return false
 	}
-	_, err := os.Stat(filepath.Join(paths.State, "consent.json"))
-	return err == nil
+	st, err := state.Open(paths)
+	if err != nil {
+		return false
+	}
+	c, err := st.Consent()
+	return err == nil && c != nil
 }
 
 func printScheduleStatus(app *App, be schedule.Backend, paths config.Paths, jobs []schedule.Job) int {

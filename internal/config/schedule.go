@@ -2,9 +2,12 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 const (
@@ -64,6 +67,37 @@ func FormatInterval(d time.Duration) string {
 		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
 	}
 	return strconv.FormatInt(int64(d/time.Minute), 10) + "m"
+}
+
+// AppliedScheduleInterval is the schedule.interval stored in applied.toml and whether there is one. An applied.toml
+// that cannot be read or parsed is an error.
+func AppliedScheduleInterval(p Paths) (string, bool, error) {
+	doc := map[string]any{}
+	if _, err := toml.DecodeFile(AppliedPath(p.Config), &doc); err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("config: %s: %w", AppliedPath(p.Config), err)
+	}
+	sec, _ := doc["schedule"].(map[string]any)
+	s, ok := sec["interval"].(string)
+	return s, ok, nil
+}
+
+// RestoreScheduleInterval puts schedule.interval in applied.toml back to what AppliedScheduleInterval returned:
+// the stored value when had, no value at all otherwise.
+func RestoreScheduleInterval(p Paths, prev string, had bool) error {
+	if had {
+		return Apply(p, Change{Key: "schedule.interval", Value: prev})
+	}
+	return writeApplied(p, func(doc map[string]any) {
+		if sec, ok := doc["schedule"].(map[string]any); ok {
+			delete(sec, "interval")
+			if len(sec) == 0 {
+				delete(doc, "schedule")
+			}
+		}
+	})
 }
 
 // ScheduleInterval is the effective schedule.interval of the config at p. A Paths without a config file path

@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,19 +160,81 @@ func TestChangingIntervalReloadsPerBackend(t *testing.T) {
 	}
 }
 
-func TestLaunchdStatusNextRun(t *testing.T) {
+// launchctl print of a StartInterval job shows no next run; launchd reports none.
+func TestLaunchdStatusHasNoNextRun(t *testing.T) {
 	r := &testutil.FakeRunner{}
-	r.On([]string{"launchctl", "print"}, "gui/501/x = {\n\truns = 3\n\ttime until next run = 754 seconds\n}\n", nil)
+	r.On([]string{"launchctl", "print"}, "gui/501/x = {\n\truns = 3\n\tlast exit code = 0\n\trun interval = 1800 seconds\n}\n", nil)
 	b, _ := newLaunchd(t, r)
 	st, err := b.Status(LabelRun)
-	if err != nil || st.Next != "12m34s" {
+	if err != nil || !st.Installed || st.Next != "" {
 		t.Fatalf("%+v %v", st, err)
 	}
-	r2 := &testutil.FakeRunner{}
-	r2.On([]string{"launchctl", "print"}, "gui/501/x = {\n\truns = 3\n}\n", nil)
-	b2, _ := newLaunchd(t, r2)
-	if st, _ := b2.Status(LabelRun); st.Next != "" {
-		t.Fatalf("invented a next run: %+v", st)
+}
+
+// bootstrapRunner is a launchctl fake: the bootstrap calls numbered in failOn (1-based) fail, everything else works.
+type bootstrapRunner struct {
+	calls     []string
+	bootstrap int
+	failOn    map[int]bool
+}
+
+func (r *bootstrapRunner) Run(_ context.Context, _ string, argv ...string) ([]byte, error) {
+	r.calls = append(r.calls, strings.Join(argv, " "))
+	if len(argv) > 1 && argv[1] == "bootstrap" {
+		r.bootstrap++
+		if r.failOn[r.bootstrap] {
+			return nil, errFail
+		}
+	}
+	return nil, nil
+}
+
+func (r *bootstrapRunner) LookPath(name string) (string, error) { return "/bin/" + name, nil }
+
+func TestLaunchdFailedBootstrapRestoresThePreviousJob(t *testing.T) {
+	r := &bootstrapRunner{failOn: map[int]bool{2: true}}
+	home := testutil.TempHome(t)
+	b := &Launchd{Home: home, UID: 501, PathEnv: "/usr/bin", Run: r, Stat: binExists}
+	if err := b.Install(jobEvery(30 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	plist := filepath.Join(home, "Library", "LaunchAgents", LabelRun+".plist")
+	old, _ := os.ReadFile(plist)
+	r.calls = nil
+	err := b.Install(jobEvery(2 * time.Hour))
+	if err == nil || !strings.Contains(err.Error(), "restored") {
+		t.Fatalf("error %v", err)
+	}
+	if got, _ := os.ReadFile(plist); string(got) != string(old) {
+		t.Fatalf("old plist not restored:\n%s", got)
+	}
+	want := []string{"launchctl bootout gui/501/" + LabelRun, "launchctl bootstrap gui/501 " + plist, "launchctl bootstrap gui/501 " + plist}
+	if strings.Join(r.calls, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("calls %v want %v", r.calls, want)
+	}
+}
+
+func TestLaunchdPreviousJobThatCannotBeReloadedIsReported(t *testing.T) {
+	r := &bootstrapRunner{failOn: map[int]bool{2: true, 3: true}}
+	home := testutil.TempHome(t)
+	b := &Launchd{Home: home, UID: 501, PathEnv: "/usr/bin", Run: r, Stat: binExists}
+	if err := b.Install(jobEvery(30 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Install(jobEvery(2 * time.Hour)); err == nil || !strings.Contains(err.Error(), "could not be loaded again") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestLaunchdFailedFirstBootstrapLeavesNoPlist(t *testing.T) {
+	r := &bootstrapRunner{failOn: map[int]bool{1: true}}
+	home := testutil.TempHome(t)
+	b := &Launchd{Home: home, UID: 501, PathEnv: "/usr/bin", Run: r, Stat: binExists}
+	if err := b.Install(runJob()); err == nil {
+		t.Fatal("no error")
+	}
+	if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", LabelRun+".plist")); !os.IsNotExist(err) {
+		t.Fatal("a plist is left although there was none before")
 	}
 }
 

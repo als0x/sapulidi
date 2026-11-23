@@ -123,6 +123,72 @@ func TestScheduleInstallEveryRefusals(t *testing.T) {
 	}
 }
 
+func TestScheduleInstallWithUnreadableConfigInstallsNothing(t *testing.T) {
+	for _, args := range [][]string{{"schedule", "install"}, {"schedule", "install", "--every", "2h"}} {
+		f := &fakeBackend{installed: map[string]bool{}, jobs: map[string]schedule.Job{}}
+		p := useFake(t, f)
+		if err := os.MkdirAll(filepath.Dir(p.Config), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		applied := config.AppliedPath(p.Config)
+		body := "[schedule]\ninterval = \"7d\"\nthis is = = garbage\n"
+		if err := os.WriteFile(applied, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, _, errs := run(t, args...)
+		if code != 1 || !strings.Contains(errs, applied) {
+			t.Errorf("%v: code %d %q", args, code, errs)
+		}
+		if len(f.installed) != 0 || len(f.jobs) != 0 {
+			t.Errorf("%v: installed %v", args, f.installed)
+		}
+		if got, _ := os.ReadFile(applied); string(got) != body {
+			t.Errorf("%v: applied.toml was changed:\n%s", args, got)
+		}
+	}
+}
+
+func TestScheduleFailedInstallRestoresTheStoredInterval(t *testing.T) {
+	f := &fakeBackend{installed: map[string]bool{}, jobs: map[string]schedule.Job{}}
+	p := useFake(t, f)
+	f.failWith = errors.New("cron cannot run every 90m; use 5 to 59 minutes, whole hours up to 23, 1d or 7d")
+	// No stored value before: none after, the effective value is the default from no file.
+	if code, _, _ := run(t, "schedule", "install", "--every", "90m"); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if v, had, err := config.AppliedScheduleInterval(p); err != nil || had {
+		t.Fatalf("a refused value stayed stored: %q %v %v", v, had, err)
+	}
+	if cfg, _, _ := config.Load(p.Config); cfg.Schedule.Interval != 30*time.Minute {
+		t.Fatalf("%v", cfg.Schedule.Interval)
+	}
+	// A stored value before: the same one after.
+	if err := config.Apply(p, config.Change{Key: "schedule.interval", Value: "2h"}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := run(t, "schedule", "install", "--every", "90m"); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if v, had, _ := config.AppliedScheduleInterval(p); !had || v != "2h" {
+		t.Fatalf("stored %q %v", v, had)
+	}
+}
+
+func TestScheduleStatusTreatsAnUnreadableConsentAsNone(t *testing.T) {
+	f := &fakeBackend{installed: map[string]bool{schedule.LabelRun: true}}
+	p := useFake(t, f)
+	recordConsent(t, p)
+	consent := filepath.Join(p.State, "consent.json")
+	for name, body := range map[string]string{"corrupt": "{not json", "empty": ""} {
+		if err := os.WriteFile(consent, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, out, _ := run(t, "schedule", "status"); !strings.Contains(out, "dry runs only: no consent recorded") {
+			t.Errorf("%s consent.json: no dry-run note in:\n%s", name, out)
+		}
+	}
+}
+
 func TestScheduleStatusShowsIntervalNextRunAndConsent(t *testing.T) {
 	f := &fakeBackend{installed: map[string]bool{schedule.LabelRun: true}, next: "12m34s"}
 	p := useFake(t, f)
