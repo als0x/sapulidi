@@ -89,7 +89,8 @@ func newFixture(t *testing.T) *fixture {
 	repo := testutil.MakeRepo(t, filepath.Join(home, "code", "repo"))
 	facts := &testutil.MemFacts{}
 	env := &core.Env{
-		Home: home, Now: time.Now().Add(60 * 24 * time.Hour), Roots: []core.Root{{Path: repo, Source: "config"}},
+		Exclusions: testutil.NoExclusions,
+		Home:       home, Now: time.Now().Add(60 * 24 * time.Hour), Roots: []core.Root{{Path: repo, Source: "config"}},
 		Rules: testRules(), Platform: &testutil.FakePlatform{Temp: filepath.Join(home, "tmp"), Free: 100 << 30},
 		Run: &testutil.FakeRunner{}, Settings: &testutil.FakeSettings{ConsentAll: true, Categories: map[string]bool{"worktrees": true}},
 		Log: &testutil.MemLogger{}, Facts: facts, Ctx: context.Background(), TempDir: filepath.Join(home, "tmp"),

@@ -45,6 +45,12 @@ func TestExcluded(t *testing.T) {
 		{"worktree elsewhere", core.Candidate{Path: other, Base: nm, Removal: core.WorktreeRemove, Dir: nm}, false},
 		{"base inside an exclusion", core.Candidate{Path: filepath.Join(real, "a"), Base: real, Removal: core.RenameDelete}, true},
 		{"base only inside, path outside lexically", core.Candidate{Path: other, Base: real, Removal: core.RenameDelete}, true},
+		{"prune: Dir is the exclusion", core.Candidate{Removal: core.ToolCommand, Dir: real, Command: []string{"git"}}, true},
+		{"prune: Dir contains an exclusion", core.Candidate{Removal: core.ToolCommand, Dir: nm, Command: []string{"git"}}, true},
+		{"prune: Dir below an exclusion", core.Candidate{Removal: core.ToolCommand, Dir: filepath.Join(real, "x"), Command: []string{"git"}}, true},
+		{"prune: Dir elsewhere", core.Candidate{Removal: core.ToolCommand, Dir: other, Command: []string{"git"}}, false},
+		{"worktree remove: main repo is excluded", core.Candidate{Path: other, Base: nm, Removal: core.WorktreeRemove, Dir: real}, true},
+		{"tool with path: Dir only contains an exclusion", core.Candidate{Path: other, Base: nm, Removal: core.ToolCommand, Dir: nm}, false},
 		{"report only", core.Candidate{Path: real, Removal: core.ReportOnly}, true},
 	}
 	for _, c := range cases {
@@ -60,7 +66,8 @@ func TestExcluded(t *testing.T) {
 			t.Errorf("%s: got %v, want Keep(excluded, %s)", c.name, err, real)
 		}
 	}
-	for _, c := range []core.Candidate{{Path: "rel/keep"}, {Path: real, Base: "rel"}} {
+	for _, c := range []core.Candidate{{Path: "rel/keep"}, {Path: real, Base: "rel"},
+		{Removal: core.ToolCommand, Dir: "rel"}, {Path: other, Removal: core.WorktreeRemove, Dir: "rel"}} {
 		var ke *core.KeepError
 		if err := Excluded(list, c); !errors.As(err, &ke) || ke.Why != "excluded" || !strings.Contains(ke.Detail, "not absolute") {
 			t.Errorf("relative %+v: %v", c, err)

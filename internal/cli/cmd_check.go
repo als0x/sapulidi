@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/als0x/sapulidi/internal/config"
+	"github.com/als0x/sapulidi/internal/exclude"
 	"github.com/als0x/sapulidi/internal/execx"
 	"github.com/als0x/sapulidi/internal/platform"
 	"github.com/als0x/sapulidi/internal/state"
@@ -34,6 +35,10 @@ func runCheck(app *App, args []string) int {
 	}
 	paths, err := config.ResolvePaths()
 	if err != nil {
+		return fail(app, "check", err)
+	}
+	// Like every command that decides about deletions, check fails closed on a corrupt exclude.toml.
+	if _, err := exclude.Load(paths); err != nil {
 		return fail(app, "check", err)
 	}
 	st, err := state.Open(paths)

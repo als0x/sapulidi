@@ -45,7 +45,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := &core.Env{Home: home, Now: time.Now(), Roots: []core.Root{{Path: root, Source: "config"}},
+	env := &core.Env{Exclusions: testutil.NoExclusions, Home: home, Now: time.Now(), Roots: []core.Root{{Path: root, Source: "config"}},
 		Platform: &testutil.FakePlatform{OSName: "linux", Free: 100 << 30},
 		Run:      &testutil.FakeRunner{}, Settings: &testutil.FakeSettings{Growth: 5 << 30, LowDisk: 15 << 30, Notify: true}}
 	return &fixture{env: env, root: root}

@@ -35,21 +35,28 @@ func TestBuildEnvFailsClosedOnCorruptExclusions(t *testing.T) {
 func TestCommandsRefuseWithCorruptExclusions(t *testing.T) {
 	home := testutil.TempHome(t)
 	writeExclude(t, home, "[[exclude]\nthis is not toml")
-	for _, cmd := range []string{"plan", "run", "report"} {
+	// Every command that builds an env or decides about deletions, check (the SessionStart hook) included.
+	// `proposals` only lists, shows and rejects without an env; applying a clean-once proposal builds one.
+	// `agent run` builds one only to look for growth anomalies and removes nothing.
+	for _, args := range [][]string{{"plan"}, {"run"}, {"report"}, {"check"}, {"explain", "/some/path"}, {"procs"}} {
 		var out, errb bytes.Buffer
-		if code := Main([]string{cmd}, &out, &errb); code != 1 {
-			t.Errorf("%s: exit %d, want 1 (stdout %q stderr %q)", cmd, code, out.String(), errb.String())
+		if code := Main(args, &out, &errb); code != 1 {
+			t.Errorf("%v: exit %d, want 1 (stdout %q stderr %q)", args, code, out.String(), errb.String())
 		}
 		if !bytes.Contains(errb.Bytes(), []byte(exclude.FileName)) {
-			t.Errorf("%s: stderr does not name the file: %q", cmd, errb.String())
+			t.Errorf("%v: stderr does not name the file: %q", args, errb.String())
 		}
 	}
 }
 
 func TestBuildEnvAcceptsMissingAndValidExclusions(t *testing.T) {
 	home := testutil.TempHome(t)
-	if _, err := buildEnv(); err != nil {
+	env, err := buildEnv()
+	if err != nil {
 		t.Fatalf("missing file: %v", err)
+	}
+	if env.Exclusions == nil {
+		t.Fatal("buildEnv must always set Env.Exclusions, even for an empty list")
 	}
 	writeExclude(t, home, "[[exclude]]\npath = \"/some/where\"\nadded = \"2026-01-01\"\n")
 	if _, err := buildEnv(); err != nil {

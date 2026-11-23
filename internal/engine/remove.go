@@ -25,7 +25,7 @@ const (
 // The category's Proof is last. Any non-nil result keeps the candidate.
 func (r *runner) guards(cat core.Category, c core.Candidate, rule core.Rule) error {
 	e := r.env
-	if err := guard.Excluded(exclusions, c); err != nil { // the user's exclusions come before every other guard
+	if err := guard.Excluded(e.Exclusions, c); err != nil { // the user's exclusions come before every other guard
 		return err
 	}
 	switch c.Removal {
@@ -139,7 +139,7 @@ func baseAllowed(e *core.Env, base string) error {
 // remove removes one candidate whose guards passed. A nil error means the removal is committed.
 func (r *runner) remove(cat core.Category, c core.Candidate, rule core.Rule) error {
 	// The re-check of the exclusions, for every kind, right before anything is removed.
-	if err := guard.Excluded(exclusions, c); err != nil {
+	if err := guard.Excluded(r.env.Exclusions, c); err != nil {
 		return err
 	}
 	switch c.Removal {
@@ -238,6 +238,10 @@ func (r *runner) renameDelete(cat core.Category, c core.Candidate, rule core.Rul
 		if _, err := os.Lstat(renamed); errors.Is(err, fs.ErrNotExist) {
 			break
 		}
+	}
+	// The exclusions are the very last check before the commit point.
+	if err := guard.Excluded(e.Exclusions, c); err != nil {
+		return err
 	}
 	if err := os.Rename(c.Path, renamed); err != nil { // the commit point
 		return err

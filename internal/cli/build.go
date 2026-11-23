@@ -9,7 +9,6 @@ import (
 
 	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/core"
-	"github.com/als0x/sapulidi/internal/engine"
 	"github.com/als0x/sapulidi/internal/exclude"
 	"github.com/als0x/sapulidi/internal/execx"
 	packsload "github.com/als0x/sapulidi/internal/packs"
@@ -79,10 +78,8 @@ func buildEnv() (*core.Env, error) {
 	// A corrupt exclude.toml fails the command closed: nothing may run without knowing what the user protects.
 	excl, err := exclude.Load(paths)
 	if err != nil {
-		engine.SetExclusions(nil)
 		return nil, err
 	}
-	engine.SetExclusions(excl)
 	st, err := state.Open(paths)
 	if err != nil {
 		return nil, err
@@ -122,7 +119,7 @@ func buildEnv() (*core.Env, error) {
 		TempDirs: []string{tempDir, "/tmp", "/private/tmp"},
 	})
 	return &core.Env{
-		Home: home, Now: now, Roots: found, Rules: rules, Platform: plat, Run: run,
+		Exclusions: excl, Home: home, Now: now, Roots: found, Rules: rules, Platform: plat, Run: run,
 		Settings: config.NewSettings(cfg, consent, buckets), Log: log, Facts: nopFacts{},
 		Ctx: context.Background(), TempDir: tempDir,
 	}, nil

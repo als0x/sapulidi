@@ -98,7 +98,8 @@ func newFix(t *testing.T) *fix {
 		log:  &testutil.MemLogger{},
 	}
 	f.env = &core.Env{
-		Home: home, Now: time.Now(), Platform: f.plat, Run: f.run, Settings: f.set, Log: f.log,
+		Exclusions: testutil.NoExclusions,
+		Home:       home, Now: time.Now(), Platform: f.plat, Run: f.run, Settings: f.set, Log: f.log,
 		Ctx: context.Background(), TempDir: tmp,
 		Rules: []core.Rule{
 			{Pack: "x", ID: "a", Rev: 1, Category: "temp", Bucket: core.Auto, Kind: core.KindTemp, MinAge: time.Hour},

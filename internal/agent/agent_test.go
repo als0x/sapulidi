@@ -784,7 +784,8 @@ func TestApplyCleanOnceRunsGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := &core.Env{
-		Home: f.home, Now: time.Now(), TempDir: tmp, Ctx: context.Background(),
+		Exclusions: testutil.NoExclusions,
+		Home:       f.home, Now: time.Now(), TempDir: tmp, Ctx: context.Background(),
 		Platform: &testutil.FakePlatform{Temp: tmp, Free: 1 << 40},
 		Run:      f.run, Log: &testutil.MemLogger{},
 		Settings: &testutil.FakeSettings{ConsentAll: true, Categories: map[string]bool{}}, // deps is NOT enabled

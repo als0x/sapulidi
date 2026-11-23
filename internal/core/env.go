@@ -47,20 +47,31 @@ type FactSink interface {
 }
 
 type Env struct {
-	Home     string
-	Now      time.Time
-	Roots    []Root
-	Rules    []Rule
-	Platform Platform
-	Run      Runner
-	Settings Settings
-	Log      Logger
-	Facts    FactSink
-	Ctx      context.Context // run budget; categories stop scanning when it is done
-	TempDir  string          // Platform.TempDir() resolved once per run; "" when unknown
+	// Exclusions is the user's exclusion list (*exclude.List). nil means "never loaded": the engine then refuses to
+	// plan or run. An empty list is the way to say "nothing is excluded".
+	Exclusions Excluder
+	Home       string
+	Now        time.Time
+	Roots      []Root
+	Rules      []Rule
+	Platform   Platform
+	Run        Runner
+	Settings   Settings
+	Log        Logger
+	Facts      FactSink
+	Ctx        context.Context // run budget; categories stop scanning when it is done
+	TempDir    string          // Platform.TempDir() resolved once per run; "" when unknown
 	// Progress, when set, is called after each category finishes scanning: done categories of total. It is
 	// called from the scanning goroutine, never concurrently.
 	Progress func(category string, done, total int)
+}
+
+// Excluder matches paths against the user's exclusions; *exclude.List implements it (core cannot import exclude).
+type Excluder interface {
+	// Match reports an entry equal to, containing or inside candidate's folder form (candidate is inside an entry).
+	Match(candidate string) (matched string, ok bool)
+	// Within reports an entry inside candidate (candidate contains an exclusion).
+	Within(candidate string) (matched string, ok bool)
 }
 
 // Category turns rules into candidates. Scan must not modify anything.

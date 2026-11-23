@@ -60,7 +60,8 @@ func newFixture(t *testing.T, packNames ...string) *fixture {
 	}
 	fp := &testutil.FakePlatform{Temp: filepath.Join(home, "tmp"), Free: 100 << 30}
 	env := &core.Env{
-		Home: home, Now: time.Now(), Roots: []core.Root{{Path: root, Source: "config"}},
+		Exclusions: testutil.NoExclusions,
+		Home:       home, Now: time.Now(), Roots: []core.Root{{Path: root, Source: "config"}},
 		Rules: allRules(t, packNames...), Platform: fp, Run: &testutil.FakeRunner{},
 		Settings: &testutil.FakeSettings{ConsentAll: true, Categories: map[string]bool{"deps": true, "build-output": true}},
 		Log:      &testutil.MemLogger{}, Ctx: context.Background(),
