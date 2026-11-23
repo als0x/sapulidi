@@ -93,14 +93,27 @@ func (b *Launchd) Install(j Job) error {
 		return fmt.Errorf("schedule: binary %s: %w", j.Argv[0], err)
 	}
 	path := b.plist(j.Label)
+	old, readErr := os.ReadFile(path)
+	hadOld := readErr == nil
 	if err := atomic.WriteFile(path, []byte(b.render(j))); err != nil {
 		return err
 	}
 	// Not loaded yet is the normal case; any bootout failure is ignored, bootstrap decides.
 	_, _ = b.Run.Run(ctx(), "", "launchctl", "bootout", b.domain(j.Label))
-	if _, err := b.Run.Run(ctx(), "", "launchctl", "bootstrap", fmt.Sprintf("gui/%d", b.UID), path); err != nil {
-		_ = os.Remove(path) // do not leave a plist launchd would load at the next login
-		return fmt.Errorf("launchctl bootstrap: %w", err)
+	domain := fmt.Sprintf("gui/%d", b.UID)
+	if _, err := b.Run.Run(ctx(), "", "launchctl", "bootstrap", domain, path); err != nil {
+		if !hadOld {
+			_ = os.Remove(path) // do not leave a plist launchd would load at the next login
+			return fmt.Errorf("launchctl bootstrap: %w", err)
+		}
+		// A job that worked before keeps working: put its plist back and load it again.
+		if werr := atomic.WriteFile(path, old); werr != nil {
+			return fmt.Errorf("launchctl bootstrap: %w (the previous plist could not be restored: %v)", err, werr)
+		}
+		if _, rerr := b.Run.Run(ctx(), "", "launchctl", "bootstrap", domain, path); rerr != nil {
+			return fmt.Errorf("launchctl bootstrap: %w (the previous job could not be loaded again: %v)", err, rerr)
+		}
+		return fmt.Errorf("launchctl bootstrap: %w (the previous job was restored)", err)
 	}
 	return nil
 }
@@ -134,5 +147,7 @@ func (b *Launchd) Status(label string) (Status, error) {
 			}
 		}
 	}
+	// `launchctl print` of a StartInterval job shows runs, last exit code and the run interval, but no next run,
+	// so launchd reports none.
 	return Status{Installed: true, Detail: strings.Join(parts, ", ")}, nil
 }

@@ -112,7 +112,7 @@ func runDoctor(app *App, args []string) int {
 				all = false
 				parts = append(parts, j.Label+": not installed")
 			default:
-				parts = append(parts, j.Label+": installed")
+				parts = append(parts, j.Label+": installed, every "+config.FormatInterval(j.Interval))
 				if drift := schedule.EnvDrift(be, j); len(drift) > 0 {
 					all = false
 					parts = append(parts, strings.Join(drift, "; "))

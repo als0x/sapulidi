@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/als0x/sapulidi/internal/core"
@@ -109,6 +110,9 @@ func (b *Systemd) Remove(label string) error {
 	return nil
 }
 
+// timerLeft finds the LEFT column of `systemctl list-timers`: number-unit words such as "1h 2min" before " left".
+var timerLeft = regexp.MustCompile(`((?:\d+\s?(?:y|year|years|month|months|w|week|weeks|d|day|days|h|hr|min|s|sec|ms|us)\s)+)left`)
+
 // Status reports linger off as a warning; it never enables linger.
 func (b *Systemd) Status(label string) (Status, error) {
 	_, err := b.Run.Run(ctx(), "", "systemctl", "--user", "is-enabled", label+".timer")
@@ -119,6 +123,12 @@ func (b *Systemd) Status(label string) (Status, error) {
 		return Status{}, err
 	}
 	st := Status{Installed: true}
+	// A failing list-timers only drops the next run.
+	if lt, err := b.Run.Run(ctx(), "", "systemctl", "--user", "list-timers", "--no-legend", label+".timer"); err == nil {
+		if m := timerLeft.FindStringSubmatch(string(lt)); m != nil {
+			st.Next = strings.TrimSpace(m[1])
+		}
+	}
 	out, err := b.Run.Run(ctx(), "", "loginctl", "show-user", b.User, "-p", "Linger", "--value")
 	if err != nil || strings.TrimSpace(string(out)) != "yes" {
 		st.Warnings = append(st.Warnings, "linger is off: the timer stops when you log out; run `loginctl enable-linger "+

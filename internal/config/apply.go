@@ -13,7 +13,8 @@ import (
 )
 
 // Change is one setting an approved proposal wants. Key is "category.<name>.enabled", "category.<name>.age" or
-// "rule.<pack>/<id>.enabled"; Value is "true"/"false" or a duration like "30d".
+// "rule.<pack>/<id>.enabled" or "schedule.interval"; Value is "true"/"false" or a duration like "30d"
+// (for schedule.interval: 5m to 7d, see ParseScheduleInterval).
 type Change struct {
 	Key   string
 	Value string
@@ -30,6 +31,20 @@ var (
 // Apply records c in <config dir>/applied.toml. It never rewrites config.toml. The key and value are validated,
 // and a never-bucket category cannot be named.
 func Apply(p Paths, c Change) error {
+	if c.Key == "schedule.interval" {
+		d, err := ParseScheduleInterval(c.Value)
+		if err != nil {
+			return fmt.Errorf("config: %s: %w", c.Key, err)
+		}
+		return writeApplied(p, func(doc map[string]any) {
+			sec, _ := doc["schedule"].(map[string]any)
+			if sec == nil {
+				sec = map[string]any{}
+			}
+			sec["interval"] = FormatInterval(d)
+			doc["schedule"] = sec
+		})
+	}
 	var section, name, field string
 	if m := catKey.FindStringSubmatch(c.Key); m != nil {
 		section, name, field = "category", m[1], m[2]
@@ -59,22 +74,29 @@ func Apply(p Paths, c Change) error {
 		val = c.Value == "true"
 	}
 
+	return writeApplied(p, func(doc map[string]any) {
+		sec, _ := doc[section].(map[string]any)
+		if sec == nil {
+			sec = map[string]any{}
+		}
+		ent, _ := sec[name].(map[string]any)
+		if ent == nil {
+			ent = map[string]any{}
+		}
+		ent[field] = val
+		sec[name] = ent
+		doc[section] = sec
+	})
+}
+
+// writeApplied reads applied.toml, lets set change it and writes it back atomically.
+func writeApplied(p Paths, set func(doc map[string]any)) error {
 	path := AppliedPath(p.Config)
 	doc := map[string]any{}
 	if _, err := toml.DecodeFile(path, &doc); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("config: %s: %w", path, err)
 	}
-	sec, _ := doc[section].(map[string]any)
-	if sec == nil {
-		sec = map[string]any{}
-	}
-	ent, _ := sec[name].(map[string]any)
-	if ent == nil {
-		ent = map[string]any{}
-	}
-	ent[field] = val
-	sec[name] = ent
-	doc[section] = sec
+	set(doc)
 
 	var sb strings.Builder
 	sb.WriteString("# Written by sapulidi from approved proposals. config.toml is never rewritten; this file wins per key.\n")
