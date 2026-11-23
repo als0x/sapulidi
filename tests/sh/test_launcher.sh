@@ -54,7 +54,7 @@ run() { # runs the launcher with the private PATH
 command -v curl >/dev/null || { echo "skip: curl missing"; exit 0; }
 check "sh -n" sh -n "$root/bin/sapulidi"
 if command -v shellcheck >/dev/null; then check "shellcheck" shellcheck -s sh "$root/bin/sapulidi"; fi
-check "checksums.txt has four placeholder lines" test "$(grep -c '^0\{64\}  sapulidi_0\.1\.0_\(darwin\|linux\)_\(arm64\|amd64\)$' "$root/checksums.txt")" = 4
+check "checksums.txt has one SHA-256 line per target" test "$(grep -c '^[0-9a-f]\{64\}  sapulidi_0\.1\.0_\(darwin\|linux\)_\(arm64\|amd64\)$' "$root/checksums.txt")" = 4
 
 # download, verify, install, exec
 new_env t1
