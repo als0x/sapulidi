@@ -1,0 +1,40 @@
++- summary -------------------------------------------------------------------+ +- keys -------------------------------+
+| agents installed: 2                                                         | | esc: back     d: delete              |
+| to remove: 0 B, 0 of 5 selected                                             | | / : search    s: sort                |
+| excluded: 1   kept by guards: 1                                             | | enter: detail space: select          |
+| schedule: every 30m, next 14:30                                             | | x: exclude    a: select all          |
+| disk free: 37.3 GB -> 37.3 GB                                               | | o: optional   q: quit                |
++-----------------------------------------------------------------------------+ +--------------------------------------+
+          size path                                                                      age   updatedAt  source        
+>[ ]    1.1 GB /home/user/proj/node_modules                                              8mo   2026-06-30 optional-on   
+ [-]  667.6 MB /home/user/proj2/target                                                   10mo  2026-09-09 excluded      
+ [ ]   57.2 MB /home/user/containers/stopped                                             54d   2026-10-02 optional-on   
+ [ ]    2.9 GB /home/user/.cache/go-build                                                22mo  2026-11-01 auto          
+ [ ]    9.5 MB /home/user/zz                                                             -     2026-11-10 auto          
+ [-]  476.8 MB /home/user/.npm/_cacache                                                  15mo  2026-11-20 auto          
+ [-]   85.8 MB /home/user/work/repo/.venv                                                9mo   2026-11-20 kept          
+ [ ]   19.1 MB /home/user/a/very/long/directory/na.../the/path/column/of/the/list/target -     -          auto          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+8 rows, sorted by updatedAt, stalest first

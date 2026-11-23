@@ -1,0 +1,24 @@
++- summary -----------------------------------+ +- keys -----------------------+
+| agents installed: 2                         | | esc: back     d: delete      |
+| to remove: 0 B, 0 of 1 selected             | | / : search    s: sort        |
+| excluded: 1   kept by guards: 1             | | enter: detail space: select  |
+| schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
+| disk free: 37.3 GB -> 37.3 GB               | | o: optional   q: quit        |
++---------------------------------------------+ +------------------------------+
+          size path                              age   updatedAt  source        
+>[ ]    1.1 GB /home/user/proj/node_modules      8mo   2026-06-30 optional-on   
+ [-]  476.8 MB /home/user/.npm/_cacache          15mo  2026-11-20 auto          
+
+
+
+
+
+
+
+
+
+
+
+
+
+/node_
