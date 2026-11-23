@@ -29,8 +29,9 @@ type Row struct {
 	Block    string   // when set, the row cannot be selected and this is the reason
 	Guards   []string // guards that passed, with their numbers
 	Children []Child  // largest children
-	// Containers lists the ids a group row stands for; the confirmation shows each one.
-	Containers []string
+	// Members makes the row a group (stopped containers): the member candidate paths, `<engine>:<id>`. Selecting the
+	// group selects every member and the confirmation lists each one; the group's own Path is never deleted.
+	Members []string
 }
 
 // Child is one of the largest things inside a row.
@@ -94,9 +95,44 @@ func (m Model) visible() []Row {
 }
 
 func matches(r Row, f string) bool {
-	return strings.Contains(strings.ToLower(r.Path), f) ||
-		strings.Contains(strings.ToLower(r.Category), f) ||
-		strings.Contains(strings.ToLower(r.Source), f)
+	for _, s := range []string{r.Path, r.Category, r.Source, sourceLabel(r.Source, true), sourceLabel(r.Source, false)} {
+		if strings.Contains(strings.ToLower(s), f) {
+			return true
+		}
+	}
+	return false
+}
+
+// deletePaths are the paths Delete carries for rows: a group's members, otherwise the row's path; no path twice.
+func deletePaths(rows []Row) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, r := range rows {
+		ps := r.Members
+		if len(ps) == 0 {
+			ps = []string{r.Path}
+		}
+		for _, p := range ps {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// dedupeRows keeps the first row of each path.
+func dedupeRows(rows []Row) []Row {
+	seen := map[string]bool{}
+	out := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		if !seen[r.Path] {
+			seen[r.Path] = true
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func less(k SortKey, a, b Row) bool {
@@ -145,14 +181,16 @@ func (m Model) selected() []Row {
 	return out
 }
 
-func sumBytes(rows []Row) int64 {
-	var n int64
+// sumBytes adds the known sizes and counts the rows of unknown size.
+func sumBytes(rows []Row) (known int64, unknown int) {
 	for _, r := range rows {
-		if r.Bytes > 0 {
-			n += r.Bytes
+		if r.Bytes < 0 {
+			unknown++
+		} else {
+			known += r.Bytes
 		}
 	}
-	return n
+	return known, unknown
 }
 
 func (m Model) cursorRow() (Row, bool) {

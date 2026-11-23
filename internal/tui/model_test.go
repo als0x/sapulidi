@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"math/rand"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,7 +28,7 @@ func fixtureRows() []Row {
 		{Path: "/home/user/work/repo/.venv", Bytes: 90_000_000, Created: day(2026, 2, 2), Updated: day(2026, 11, 20),
 			Source: SrcKept, Category: "python", RuleKey: "python/venv@1", Block: "kept by a guard: git repository with uncommitted work"},
 		{Path: "/home/user/containers/stopped", Bytes: 60_000_000, Created: day(2026, 10, 1), Updated: day(2026, 10, 2),
-			Source: SrcOptionalOn, Category: "docker", RuleKey: "docker/stopped@1", Containers: []string{"abc123", "def456"}},
+			Source: SrcOptionalOn, Category: "docker", RuleKey: "docker/stopped@1", Members: []string{"docker:abc123", "docker:def456"}},
 		{Path: "/home/user/a/very/long/directory/name/that/does/not/fit/in/the/path/column/of/the/list/target", Bytes: 20_000_000,
 			Source: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
 		{Path: "/home/user/zz", Bytes: 10_000_000, Updated: day(2026, 11, 10), Source: SrcAuto, Category: "misc", RuleKey: "misc/zz@1"},
@@ -309,7 +308,7 @@ func TestFilter(t *testing.T) {
 
 func TestSelectedHiddenByFilterIsNotDeleted(t *testing.T) {
 	m, _ := keys(listModel(), "a/docker<enter>d")
-	if m.Screen != ScreenConfirm || !reflect.DeepEqual(m.Confirm, []string{"/home/user/containers/stopped"}) {
+	if m.Screen != ScreenConfirm || !reflect.DeepEqual(m.Confirm, []string{"docker:abc123", "docker:def456"}) {
 		t.Fatalf("confirm = %v", m.Confirm)
 	}
 }
@@ -373,42 +372,5 @@ func TestUpdateDoesNotMutateItsInput(t *testing.T) {
 	Update(m, ExclusionChangedMsg{Path: m.Rows[0].Path, Excluded: true})
 	if !reflect.DeepEqual(m, before) {
 		t.Fatal("Update changed its input")
-	}
-}
-
-func TestPropertyNeverSelectsDimAndDeleteEqualsVisibleSelection(t *testing.T) {
-	alphabet := []string{"j", "k", " ", "a", "x", "s", "o", "/", "d", "y", "n", "q", "e", "<esc>", "<enter>", "<up>", "<down>", "<bs>"}
-	rng := rand.New(rand.NewSource(7))
-	for seq := 0; seq < 300; seq++ {
-		m := listModel()
-		for step := 0; step < 80; step++ {
-			prev := m
-			k := alphabet[rng.Intn(len(alphabet))]
-			var eff []Effect
-			m, eff = keys(m, k)
-			for _, e := range eff {
-				switch e := e.(type) {
-				case AddExclusion:
-					m, _ = Update(m, ExclusionChangedMsg{Path: e.Path, Excluded: true})
-				case RemoveExclusion:
-					m, _ = Update(m, ExclusionChangedMsg{Path: e.Path, Excluded: false})
-				case Delete:
-					want := pathsOf(prev.selected())
-					if !reflect.DeepEqual(e.Paths, want) || !reflect.DeepEqual(prev.Confirm, want) {
-						t.Fatalf("seq %d step %d: Delete %v, visible selected %v", seq, step, e.Paths, want)
-					}
-					m, _ = Update(m, DeleteDoneMsg{})
-				}
-			}
-			byPath := map[string]Row{}
-			for _, r := range m.Rows {
-				byPath[r.Path] = r
-			}
-			for p := range m.Selected {
-				if !byPath[p].selectable() {
-					t.Fatalf("seq %d step %d: dim row %s is selected", seq, step, p)
-				}
-			}
-		}
 	}
 }

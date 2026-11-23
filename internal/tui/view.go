@@ -9,7 +9,8 @@ const (
 
 var sortNames = [...]string{"size, largest first", "age, oldest first", "updatedAt, stalest first", "path"}
 
-// View renders the model into at most height lines of at most width columns each (ANSI codes not counted).
+// View renders the model into at most height lines of at most width terminal columns each (the colour codes of a
+// non-plain model are not counted). Every user-supplied text is sanitised: control characters show as '?'.
 func View(m Model, width, height int) []string {
 	if width < 1 || height < 1 {
 		return nil
@@ -23,7 +24,7 @@ func View(m Model, width, height int) []string {
 	case m.Screen == ScreenDetail:
 		lines = viewDetail(m, width, height)
 	case m.Screen == ScreenConfirm:
-		lines = viewConfirm(m, width, height)
+		lines, _ = confirmLines(m, width, height)
 	case m.Screen == ScreenResult:
 		lines = viewResult(m, width, height)
 	default:
@@ -36,15 +37,10 @@ func View(m Model, width, height int) []string {
 }
 
 func tooSmall(w, h int) []string {
-	msgs := []string{"make the window larger", fmt.Sprintf("(need %dx%d, have %dx%d)", minWidth, minHeight, w, h)}
-	for i, s := range msgs {
-		r := []rune(s)
-		if len(r) > w {
-			r = r[:w]
-		}
-		msgs[i] = string(r)
+	return []string{
+		cut("make the window larger", w),
+		cut(fmt.Sprintf("(need %dx%d, have %dx%d)", minWidth, minHeight, w, h), w),
 	}
-	return msgs
 }
 
 func arrow(plain bool) string {
@@ -61,7 +57,7 @@ func panel(plain bool, title string, body []string, w int) []string {
 		tl, tr, bl, br, h, v = "+", "+", "+", "+", "-", "|"
 	}
 	head := tl + h + " " + title + " "
-	out := []string{head + repeat(h, w-1-len([]rune(head))) + tr}
+	out := []string{head + repeat(h, w-1-cols(head)) + tr}
 	for _, l := range body {
 		out = append(out, v+" "+fit(l, w-4)+" "+v)
 	}
@@ -87,7 +83,7 @@ func sideBySide(a, b []string, aw, bw int) []string {
 func center(block []string, w, h int) []string {
 	bw := 0
 	for _, l := range block {
-		bw = max(bw, len([]rune(l)))
+		bw = max(bw, cols(l))
 	}
 	left := repeat(" ", max((w-bw)/2, 0))
 	out := make([]string, 0, h)
@@ -95,7 +91,7 @@ func center(block []string, w, h int) []string {
 		out = append(out, "")
 	}
 	for _, l := range block {
-		out = append(out, left+l)
+		out = append(out, cut(left+l, w))
 	}
 	return out
 }
@@ -125,7 +121,7 @@ var keyHelp = [][2]string{
 	{"o: optional", "q: quit"},
 }
 
-func summaryLines(m Model, iw int) []string {
+func summaryLines(m Model) []string {
 	var excluded, kept, selectable int
 	for _, r := range m.Rows {
 		switch r.Source {
@@ -141,6 +137,11 @@ func summaryLines(m Model, iw int) []string {
 		}
 	}
 	sel := m.selected()
+	known, unknown := sumBytes(sel)
+	total := fmtBytes(known)
+	if unknown > 0 {
+		total = "at least " + total
+	}
 	sched := "schedule: off"
 	if m.Summary.Interval > 0 {
 		sched = "schedule: every " + fmtInterval(m.Summary.Interval)
@@ -150,12 +151,15 @@ func summaryLines(m Model, iw int) []string {
 	}
 	disk := "disk free: -"
 	if m.Summary.FreeNow > 0 {
-		disk = "disk free: " + fmtBytes(int64(m.Summary.FreeNow)) + " " + arrow(m.Plain) + " " +
-			fmtBytes(int64(m.Summary.FreeNow)+sumBytes(sel))
+		after := fmtBytes(int64(m.Summary.FreeNow) + known)
+		if unknown > 0 {
+			after = "at least " + after
+		}
+		disk = "disk free: " + fmtBytes(int64(m.Summary.FreeNow)) + " " + arrow(m.Plain) + " " + after
 	}
 	return []string{
 		fmt.Sprintf("agents installed: %d", m.Summary.Agents),
-		fmt.Sprintf("to remove: %s, %d of %d selected", fmtBytes(sumBytes(sel)), len(sel), selectable),
+		fmt.Sprintf("to remove: %s, %d of %d selected", total, len(sel), selectable),
 		fmt.Sprintf("excluded: %d   kept by guards: %d", excluded, kept),
 		sched,
 		disk,
@@ -165,7 +169,7 @@ func summaryLines(m Model, iw int) []string {
 func viewList(m Model, w, h int) []string {
 	rw := max(32, w/3)
 	lw := w - rw - 1
-	left := panel(m.Plain, "summary", summaryLines(m, lw-4), lw)
+	left := panel(m.Plain, "summary", summaryLines(m), lw)
 	keys := make([]string, len(keyHelp))
 	for i, k := range keyHelp {
 		keys[i] = fit(k[0], 14) + k[1]
@@ -188,7 +192,7 @@ func viewList(m Model, w, h int) []string {
 	for len(lines) < h-1 {
 		lines = append(lines, "")
 	}
-	return append(lines, statusLine(m, vis))
+	return append(lines, statusLine(m, vis, w))
 }
 
 func listRow(m Model, r Row, cur bool, pw int) string {
@@ -214,23 +218,23 @@ func listRow(m Model, r Row, cur bool, pw int) string {
 	return line
 }
 
-func statusLine(m Model, vis []Row) string {
+func statusLine(m Model, vis []Row, w int) string {
 	switch {
 	case m.Filtering:
-		return "/" + m.Filter + "_"
+		return cut("/"+m.Filter+"_", w)
 	case m.Summary.Paused:
-		return style(m.Plain, "33", "paused: run sapulidi resume")
+		return style(m.Plain, "33", cut("paused: run sapulidi resume", w))
 	case m.Status != "":
-		return m.Status
+		return cut(m.Status, w)
 	}
 	if r, ok := m.cursorRow(); ok && !r.selectable() {
-		return r.reason()
+		return cut(r.reason(), w)
 	}
 	s := fmt.Sprintf("%d rows, sorted by %s", len(vis), sortNames[m.Sort])
 	if m.Filter != "" {
 		s = fmt.Sprintf("filter: %s (esc clears), %s", m.Filter, s)
 	}
-	return s
+	return cut(s, w)
 }
 
 func kv(label, value string, w int) []string {
@@ -263,6 +267,9 @@ func viewDetail(m Model, w, h int) []string {
 	add("updatedAt", fmtDate(r.Updated))
 	add("category", r.Category+" "+dot(m.Plain)+" "+r.RuleKey)
 	add("source", sourceLabel(r.Source, m.Plain))
+	if len(r.Members) > 0 {
+		add("members", fmt.Sprintf("%d", len(r.Members)))
+	}
 	add("why", why)
 	if r.Block != "" || r.Source == SrcExcluded {
 		add("blocked", r.reason())
@@ -284,7 +291,11 @@ func viewDetail(m Model, w, h int) []string {
 		}
 		lines = append(lines, "  "+fitRight(fmtBytes(c.Bytes), 9)+"  "+shorten(c.Name, w-13))
 	}
-	return withFooter(lines, "esc: back  space: select  x: exclude  d: delete", h)
+	footer := "esc: back  space: select  x: exclude  d: delete"
+	if m.Status != "" {
+		footer = m.Status
+	}
+	return withFooter(lines, footer, w, h)
 }
 
 func dot(plain bool) string {
@@ -294,58 +305,70 @@ func dot(plain bool) string {
 	return "·"
 }
 
-// withFooter cuts lines so that the footer stays on the last row.
-func withFooter(lines []string, footer string, h int) []string {
+// withFooter fits every line to w and cuts lines so that the footer stays on the last row.
+func withFooter(lines []string, footer string, w, h int) []string {
 	if len(lines) > h-1 {
 		lines = lines[:h-1]
 	}
 	for len(lines) < h-1 {
 		lines = append(lines, "")
 	}
-	return append(lines, footer)
+	out := make([]string, 0, h)
+	for _, l := range lines {
+		out = append(out, cut(l, w))
+	}
+	return append(out, cut(footer, w))
 }
 
-func viewConfirm(m Model, w, h int) []string {
-	rows := make([]Row, 0, len(m.Confirm))
-	byPath := map[string]Row{}
-	for _, r := range m.Rows {
-		byPath[r.Path] = r
-	}
+// confirmLines draws the confirmation for the rows selected now. truncated is true when the window is too small to
+// list every item (and every container id of a group): the list then ends with an "and N more" line and `y` is
+// refused until the window is larger.
+func confirmLines(m Model, w, h int) (lines []string, truncated bool) {
+	rows := m.selected()
+	paths := deletePaths(rows)
 	var optOff int
-	for _, p := range m.Confirm {
-		r := byPath[p]
-		rows = append(rows, r)
+	for _, r := range rows {
 		if r.origin() == SrcOptionalOff {
 			optOff++
 		}
 	}
+	known, unknown := sumBytes(rows)
 	noun := "items"
-	if len(rows) == 1 {
+	if len(paths) == 1 {
 		noun = "item"
 	}
-	lines := []string{fmt.Sprintf("Delete %d %s, %s in total?", len(rows), noun, fmtBytes(sumBytes(rows)))}
+	lines = []string{fmt.Sprintf("Delete %d %s, %s in total?", len(paths), noun, sizeText(known, unknown))}
 	if optOff > 0 {
 		lines = append(lines, fmt.Sprintf("%d of them are optional and currently switched off.", optOff))
 	}
 	lines = append(lines, "")
-	shown := max(min(len(rows), h-len(lines)-6), 1)
-	for _, r := range rows[:shown] {
-		lines = append(lines, "  "+fitRight(fmtBytes(r.Bytes), 9)+"  "+shorten(r.Path, w-13))
-	}
-	if len(rows) > shown {
-		lines = append(lines, fmt.Sprintf("  ... and %d more", len(rows)-shown))
-	}
+	var entries []string
 	for _, r := range rows {
-		for _, id := range r.Containers {
-			lines = append(lines, "  container "+shorten(id, w-12))
+		if len(r.Members) == 0 {
+			entries = append(entries, "  "+fitRight(fmtBytes(r.Bytes), 9)+"  "+shorten(r.Path, w-13))
+			continue
+		}
+		entries = append(entries, "  "+fitRight(fmtBytes(r.Bytes), 9)+"  "+shorten(r.Path, w-25)+fmt.Sprintf(" (%d containers)", len(r.Members)))
+		for _, id := range r.Members {
+			entries = append(entries, "      "+shorten(id, w-6))
 		}
 	}
-	return withFooter(lines, "y/enter: delete  n/esc: cancel", h)
+	room := h - len(lines) - 1
+	if len(entries) > room {
+		truncated = true
+		entries = append(entries[:max(room-1, 0)], fmt.Sprintf("  ... and %d more", len(entries)-max(room-1, 0)))
+	}
+	lines = append(lines, entries...)
+	footer := "y/enter: delete  n/esc: cancel"
+	if truncated {
+		footer = "too many items for this window: enlarge it to confirm  n/esc: cancel"
+	}
+	return withFooter(lines, footer, w, h), truncated
 }
 
 func viewResult(m Model, w, h int) []string {
 	if m.Result.Pending {
-		return withFooter([]string{"deleting..."}, "", h)
+		return withFooter([]string{"deleting..."}, "", w, h)
 	}
 	r := m.Result
 	lines := []string{fmt.Sprintf("Freed %s, removed %d items.", fmtBytes(r.Freed), len(r.Removed))}
@@ -355,8 +378,9 @@ func viewResult(m Model, w, h int) []string {
 	if len(r.Kept) > 0 {
 		lines = append(lines, "", fmt.Sprintf("Kept by a guard (%d):", len(r.Kept)))
 		for _, k := range r.Kept {
-			lines = append(lines, "  "+shorten(k.Path, w-4-len([]rune(k.Why)))+"  "+k.Why)
+			why := cut(k.Why, w/2)
+			lines = append(lines, "  "+shorten(k.Path, w-6-cols(why))+"  "+why)
 		}
 	}
-	return withFooter(lines, "esc: back", h)
+	return withFooter(lines, "esc: back", w, h)
 }

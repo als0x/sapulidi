@@ -13,9 +13,11 @@ import (
 // Regenerate the golden screens with: go test ./internal/tui -update
 var update = flag.Bool("update", false, "rewrite the golden files in testdata/")
 
-var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
+// sgr matches the colour codes the view itself emits, and nothing else.
+var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
-func width(s string) int { return len([]rune(ansi.ReplaceAllString(s, ""))) }
+// width counts terminal columns of the raw line: nothing is stripped, so a stray escape sequence is counted.
+func width(s string) int { return cols(s) }
 
 func scanningModel() Model {
 	m := NewModel(true)
@@ -146,9 +148,7 @@ func TestColourModeStaysWithinWidth(t *testing.T) {
 	var coloured bool
 	for _, l := range lines {
 		coloured = coloured || strings.Contains(l, "\x1b[")
-		if width(l) > 80 {
-			t.Fatalf("line wider than 80: %q", l)
-		}
+		checkLine(t, "colour", l, 80, false)
 	}
 	if !coloured {
 		t.Fatal("expected colour codes")
@@ -161,7 +161,7 @@ func TestViewNeverExceedsTheWindow(t *testing.T) {
 		models[c.name] = c.model()
 	}
 	long := listModel()
-	long.Rows = append(long.Rows, Row{Path: "/" + strings.Repeat("deep/", 60) + "x", Bytes: 1, Source: SrcAuto, Containers: []string{strings.Repeat("c", 120)}})
+	long.Rows = append(long.Rows, Row{Path: "/" + strings.Repeat("deep/", 60) + "x", Bytes: 1, Source: SrcAuto, Members: []string{"docker:" + strings.Repeat("c", 120)}})
 	models["long"] = long
 	models["long_detail"], _ = keys(long, "<enter>")
 	for name, m := range models {

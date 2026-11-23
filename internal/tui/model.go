@@ -148,8 +148,9 @@ type Model struct {
 	Filtering    bool
 	Status       string
 	Scan         []scanLine
-	Confirm      []string // the paths the confirmation lists and `y` deletes
+	Confirm      []string // the paths the confirmation was opened for; `y` revalidates them
 	Result       Result
+	W, H         int // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
 }
 
 // NewModel is the model before the scan starts.

@@ -8,14 +8,29 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 	case KeyMsg:
 		return updateKey(m, msg)
 	case ResizeMsg:
+		m.W, m.H = msg.Width, msg.Height
 		return m, nil
 	case ScanProgressMsg:
 		return scanProgress(m, msg), nil
 	case ScanDoneMsg:
-		m.Rows = slices.Clone(msg.Rows)
+		if m.Screen == ScreenResult && m.Result.Pending {
+			return m, nil // a deletion is running; its result comes first
+		}
+		if m.Screen == ScreenConfirm {
+			m.Status = "the list changed: confirm again"
+		}
+		m.Rows = dedupeRows(msg.Rows)
 		m.Summary = msg.Summary
 		m.Screen = ScreenList
+		m.Confirm = nil
 		m.Cursor = 0
+		sel := map[string]bool{}
+		for _, r := range m.Rows {
+			if m.Selected[r.Path] && r.selectable() {
+				sel[r.Path] = true
+			}
+		}
+		m.Selected = sel
 		return m, nil
 	case DeleteDoneMsg:
 		return deleteDone(m, msg.Result), nil
@@ -43,16 +58,31 @@ func deleteDone(m Model, r Result) Model {
 		gone[p] = true
 	}
 	rows := make([]Row, 0, len(m.Rows))
+	m.Selected = cloneSel(m.Selected)
 	for _, row := range m.Rows {
-		if !gone[row.Path] {
-			rows = append(rows, row)
+		if len(row.Members) > 0 {
+			var left []string
+			for _, p := range row.Members {
+				if !gone[p] {
+					left = append(left, p)
+				}
+			}
+			if len(left) < len(row.Members) {
+				delete(m.Selected, row.Path)
+			}
+			if len(left) > 0 {
+				row.Members = left
+				rows = append(rows, row)
+			}
+			continue
 		}
+		if gone[row.Path] {
+			delete(m.Selected, row.Path)
+			continue
+		}
+		rows = append(rows, row)
 	}
 	m.Rows = rows
-	m.Selected = cloneSel(m.Selected)
-	for p := range gone {
-		delete(m.Selected, p)
-	}
 	r.Pending = false
 	m.Result = r
 	m.Screen = ScreenResult
@@ -62,9 +92,18 @@ func deleteDone(m Model, r Result) Model {
 }
 
 func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
+	if m.Screen == ScreenConfirm {
+		m.Screen = ScreenList
+		m.Confirm = nil
+		m.Status = "an exclusion changed: confirm again"
+	}
 	m.Rows = slices.Clone(m.Rows)
 	for i, r := range m.Rows {
 		if r.Path != c.Path {
+			if c.Excluded && slices.Contains(r.Members, c.Path) {
+				m.Selected = cloneSel(m.Selected) // a member of a group is excluded: the group is no longer selected
+				delete(m.Selected, r.Path)
+			}
 			continue
 		}
 		if c.Excluded && r.Source != SrcExcluded {
@@ -121,6 +160,9 @@ func listKey(m Model, k KeyMsg) (Model, []Effect) {
 	if m.Filtering {
 		return filterKey(m, k)
 	}
+	if m.small() && (k.Special == KeyEnter || k.Rune == 'a') {
+		return m, nil
+	}
 	switch {
 	case k.Special == KeyUp || k.Rune == 'k':
 		m.Cursor = clampCursor(m, m.Cursor-1)
@@ -151,6 +193,9 @@ func listKey(m Model, k KeyMsg) (Model, []Effect) {
 
 // rowAction handles the keys that act on the row under the cursor (list and detail).
 func rowAction(m Model, k KeyMsg) (Model, []Effect) {
+	if m.small() {
+		return m, nil
+	}
 	switch k.Rune {
 	case ' ':
 		if r, ok := m.cursorRow(); ok && r.selectable() {
@@ -169,6 +214,8 @@ func rowAction(m Model, k KeyMsg) (Model, []Effect) {
 			return m, []Effect{RemoveExclusion{Path: r.Path}}
 		case r.Source == SrcKept:
 			m.Status = "kept by a guard: nothing to exclude"
+		case len(r.Members) > 0:
+			m.Status = "a group cannot be excluded as a whole"
 		default:
 			return m, []Effect{AddExclusion{Path: r.Path}}
 		}
@@ -180,6 +227,7 @@ func rowAction(m Model, k KeyMsg) (Model, []Effect) {
 
 func openConfirm(m Model) (Model, []Effect) {
 	if m.Summary.Paused {
+		m.Status = "paused: run sapulidi resume"
 		return m, nil
 	}
 	sel := m.selected()
@@ -187,12 +235,20 @@ func openConfirm(m Model) (Model, []Effect) {
 		m.Status = "nothing selected: space selects a row"
 		return m, nil
 	}
-	m.Confirm = make([]string, len(sel))
-	for i, r := range sel {
-		m.Confirm[i] = r.Path
-	}
+	m.Confirm = deletePaths(sel)
 	m.Screen = ScreenConfirm
 	return m, nil
+}
+
+// small reports that the window is known to be under 80x24; the keys that select or delete then do nothing.
+func (m Model) small() bool { return m.W != 0 && (m.W < minWidth || m.H < minHeight) }
+
+// size is the window size, or 80x24 before the first ResizeMsg.
+func (m Model) size() (int, int) {
+	if m.W == 0 {
+		return minWidth, minHeight
+	}
+	return m.W, m.H
 }
 
 func selectAll(m Model) Model {
@@ -253,6 +309,16 @@ func detailKey(m Model, k KeyMsg) (Model, []Effect) {
 func confirmKey(m Model, k KeyMsg) (Model, []Effect) {
 	switch {
 	case k.Rune == 'y' || k.Special == KeyEnter:
+		if m.small() {
+			return m, nil
+		}
+		if w, h := m.size(); !slices.Equal(m.Confirm, deletePaths(m.selected())) || m.Summary.Paused {
+			m.Screen, m.Confirm = ScreenList, nil
+			m.Status = "the selection changed: nothing deleted"
+			return m, nil
+		} else if _, truncated := confirmLines(m, w, h); truncated {
+			return m, nil // the list does not fit: enlarge the window
+		}
 		paths := slices.Clone(m.Confirm)
 		m.Screen = ScreenResult
 		m.Result = Result{Pending: true}
