@@ -3,7 +3,9 @@
 # usage: scripts/release.sh <version> [--dry-run]
 # Builds the four binaries the same way the release workflow does, bumps the version in the launcher,
 # install.sh and every manifest, writes checksums.txt, and only then runs tests/run.sh. It prints the commit,
-# tag and push commands; it never commits, tags or pushes. A failed run leaves the tree as it found it.
+# tag and push commands; it never commits, tags or pushes. The tree must be clean at the start. If any step fails, including the
+# suite, a trap runs git checkout on exactly the files it changed (bin/sapulidi, install.sh, checksums.txt and the
+# manifests) and removes dist/, so the tree is as it was found.
 set -eu
 cd "$(dirname "$0")/.."
 
