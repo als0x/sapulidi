@@ -61,8 +61,9 @@ applying one goes through the same guards as any removal.
 
 ## Verify a binary
 
-Releases are built by GitHub Actions from a tag, with reproducible flags (`-trimpath -buildvcs=false`,
-`CGO_ENABLED=0`), a `checksums.txt` and a build provenance attestation:
+Version 0.1.0 was built locally with `scripts/release.sh` (reproducible flags `-trimpath -buildvcs=false`,
+`CGO_ENABLED=0`) and has no build provenance attestation; the launcher checks every download against the
+`checksums.txt` committed in this repository. Releases built by GitHub Actions from a tag carry an attestation too:
 
 ```
 gh attestation verify sapulidi_<version>_<os>_<arch> --repo <owner>/sapulidi
@@ -77,6 +78,6 @@ config and state. Then remove the plugin from your host.
 
 ## Status
 
-Tested: the launcher, the binary and the full flow (setup, plan, run, consent, schedule install and remove on launchd, check, uninstall) on macOS arm64; the same flow inside an Alpine arm64 container as a non-root user (cron); and the plugin installed in Claude Code 2.1.330 from a local marketplace, with a headless session in which the SessionStart hook's line reached the model and the skill loaded as `/sapulidi` and `/sapulidi:sapulidi`. Not yet run: a download from a real GitHub release, `gh attestation verify`, an interactive real Claude Code session driven by a person, and WSL itself. Never run: Codex, Cursor, Antigravity, OpenCode, Pi (their manifests and hooks are untested).
+Tested: the launcher, the binary and the full flow (setup, plan, run, consent, schedule install and remove on launchd, check, uninstall) on macOS arm64; the same flow inside an Alpine arm64 container as a non-root user (cron); and the plugin installed in Claude Code 2.1.330 from a local marketplace, with a headless session in which the SessionStart hook's line reached the model and the skill loaded as `/sapulidi` and `/sapulidi:sapulidi`. Also run: the launcher downloading and verifying the real 0.1.0 release from GitHub. Not yet run: `gh attestation verify` (0.1.0 has none), an interactive real Claude Code session driven by a person, and WSL itself. Never run: Codex, Cursor, Antigravity, OpenCode, Pi (their manifests and hooks are untested).
 
 See `CONTRIBUTING.md` to build, test or add a pack.
