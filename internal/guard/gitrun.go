@@ -20,16 +20,22 @@ var GitTimeout = 15 * time.Second
 // argv changes nothing in the process, and argv[0] stays "git" for every Runner.
 //
 // Limits (docs/known-limits.md): this is not a sandbox. A filter driver (filter.<name>.clean or .process in
-// .git/config plus a .gitattributes in the repository) can still run during `git status` on racy-clean files, and
-// core.attributesFile, diff.external and textconv are not covered. Running git in any untrusted repository has the
-// same exposure.
+// .git/config plus a .gitattributes in the repository) still runs during `git status` on every stat-dirty file,
+// not only racy-clean ones, and core.attributesFile, diff.external and textconv are not covered. Running git in any
+// untrusted repository has the same exposure; the nested-repository proof therefore reads .git/config as a file
+// first and starts no git for a repository whose config names such a setting.
 func GitArgv(dir string, args ...string) []string {
 	return append([]string{"git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat",
 		"-C", dir}, args...)
 }
 
 func gitOut(run core.Runner, dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), GitTimeout)
+	return gitOutCtx(context.Background(), run, dir, args...)
+}
+
+// gitOutCtx is gitOut under a caller's context: the call ends at GitTimeout or when parent ends, whichever is first.
+func gitOutCtx(parent context.Context, run core.Runner, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, GitTimeout)
 	defer cancel()
 	out, err := run.Run(ctx, dir, GitArgv(dir, args...)...)
 	return string(out), err
