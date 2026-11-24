@@ -62,7 +62,7 @@ func keys(m Model, script string) (Model, []Effect) {
 			name := script[1:end]
 			script = script[end+1:]
 			switch name {
-			case "esc", "enter", "up", "down":
+			case "esc", "enter", "up", "down", "pgup", "pgdn":
 				k.Special = name
 			case "bs":
 				k.Special = KeyBackspace

@@ -129,7 +129,14 @@ func TestSmallWindowBlocksSelectingAndDeleting(t *testing.T) {
 	}
 }
 
-func TestGroupOf200MembersListsEveryIDOrRefusesY(t *testing.T) {
+// confirmPage is the entries the confirmation shows now: no header, no footer.
+func confirmPage(m Model, w, h int) []string {
+	lines, _ := confirmLines(m, w, h)
+	head, _ := confirmParts(m, w)
+	return lines[len(head) : len(lines)-1]
+}
+
+func TestGroupOf200MembersScrollsAndYConfirms(t *testing.T) {
 	m := modelWith(groupRows(200))
 	for i, r := range m.visible() {
 		if len(r.Members) > 0 {
@@ -141,20 +148,31 @@ func TestGroupOf200MembersListsEveryIDOrRefusesY(t *testing.T) {
 		t.Fatal("no confirmation")
 	}
 	screen := strings.Join(View(m, 80, 24), "\n")
-	if !strings.Contains(screen, "and ") || !strings.Contains(screen, " more") || !strings.Contains(screen, "200 containers") {
-		t.Fatalf("truncation must be announced:\n%s", screen)
+	if !strings.Contains(screen, "rows 1-") || !strings.Contains(screen, " of 201") || !strings.Contains(screen, "200 containers") {
+		t.Fatalf("scrolling must be announced:\n%s", screen)
 	}
-	if got, eff := keys(m, "y"); len(eff) != 0 || got.Screen != ScreenConfirm {
-		t.Fatalf("y must be refused while the list is cut: %v", eff)
+	seen := map[string]int{}
+	for i := 0; i < 20 && m.ConfirmTop >= 0; i++ { // page to the end
+		for _, l := range confirmPage(m, 80, 24) {
+			seen[strings.TrimSpace(l)]++
+		}
+		next, _ := keys(m, "<pgdn>")
+		if next.ConfirmTop == m.ConfirmTop {
+			break
+		}
+		m = next
 	}
-	m, _ = Update(m, ResizeMsg{Width: 80, Height: 300})
-	all := strings.Join(View(m, 80, 300), "\n")
+	_, entries := confirmParts(m, 80)
+	once := map[string]int{}
+	for _, e := range entries {
+		once[strings.TrimSpace(e)]++
+	}
 	for _, id := range m.selected()[0].Members {
-		if !strings.Contains(all, id) {
-			t.Fatalf("id %s not listed", id)
+		if seen[id] == 0 || once[id] != 1 {
+			t.Fatalf("id %s: on a page %d times, in the list %d times", id, seen[id], once[id])
 		}
 	}
-	_, eff := keys(m, "y")
+	_, eff := keys(m, "y") // at the end of the list
 	if len(eff) != 1 {
 		t.Fatalf("effects: %v", eff)
 	}
@@ -368,6 +386,11 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 	for seq := range 400 {
 		rng := rand.New(rand.NewSource(int64(seq)))
 		m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()}) // starts on the places
+		want := map[string]bool{}                                                                   // the selection, tracked by rules of its own
+		apply := func(msg Msg) {
+			shadowMsg(want, m, msg)
+			m, _ = Update(m, msg)
+		}
 		for step := range 80 {
 			prev := m
 			var msg Msg
@@ -387,37 +410,20 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 				var eff []Effect
 				key := alphabet[rng.Intn(len(alphabet))]
 				m, eff = keys(m, key)
-				// Switching views, o, g, search, sort and moving never change the selection; only space and a add to
-				// it (while a search is being typed they are text), and x and d never touch it.
-				if key != " " && key != "a" || prev.Filtering {
-					if !reflect.DeepEqual(m.Selected, prev.Selected) {
-						t.Fatalf("seq %d step %d: key %q changed the selection on screen %v", seq, step, key, prev.Screen)
-					}
-				} else if prev.Screen == ScreenPlaces && !prev.small() {
-					for p := range m.Selected {
-						if prev.Selected[p] {
-							continue
-						}
-						for _, r := range m.Rows {
-							if r.Path == p && r.Source != "auto" && r.Source != "optional-on" {
-								t.Fatalf("seq %d step %d: places key %q selected a non-ready row %s (%s)", seq, step, key, p, r.Source)
-							}
-						}
-					}
-				}
+				shadowKey(want, prev, key) // only space and a change the selection; every other key leaves it alone
 				for _, e := range eff {
 					switch e := e.(type) {
 					case AddExclusion:
-						m, _ = Update(m, ExclusionChangedMsg{Path: e.Path, Excluded: true})
+						apply(ExclusionChangedMsg{Path: e.Path, Excluded: true})
 					case RemoveExclusion:
-						m, _ = Update(m, ExclusionChangedMsg{Path: e.Path, Excluded: false})
+						apply(ExclusionChangedMsg{Path: e.Path, Excluded: false})
 					case Delete:
 						want := oracle(prev)
 						if prev.Screen != ScreenConfirm || prev.small() || !reflect.DeepEqual(e.Paths, want) || !reflect.DeepEqual(prev.Confirm, want) {
 							t.Fatalf("seq %d step %d: Delete %v; oracle %v; confirm %v; screen %v", seq, step, e.Paths, want, prev.Confirm, prev.Screen)
 						}
 						if rng.Intn(2) == 0 {
-							m, _ = Update(m, DeleteDoneMsg{Result: Result{Removed: e.Paths[:len(e.Paths)/2]}})
+							apply(DeleteDoneMsg{Result: Result{Removed: e.Paths[:len(e.Paths)/2]}})
 						} else if n, _ := Update(m, ScanDoneMsg{Rows: randomRows(rng)}); !reflect.DeepEqual(n, m) {
 							t.Fatalf("seq %d step %d: ScanDoneMsg changed a model with a pending deletion", seq, step)
 						}
@@ -425,7 +431,17 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 				}
 			}
 			if msg != nil {
-				m, _ = Update(m, msg)
+				apply(msg)
+			}
+			for p := range want {
+				if !m.Selected[p] {
+					t.Fatalf("seq %d step %d: %s should be selected (screen %v)", seq, step, p, m.Screen)
+				}
+			}
+			for p, on := range m.Selected {
+				if on && !want[p] {
+					t.Fatalf("seq %d step %d: %s is selected but no key selected it (screen %v)", seq, step, p, m.Screen)
+				}
 			}
 			rowSel := map[string]bool{}
 			for _, r := range m.Rows {
@@ -443,13 +459,7 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 				if !reflect.DeepEqual(m.Confirm, oracle(m)) {
 					t.Fatalf("seq %d step %d: confirmation %v differs from oracle %v", seq, step, m.Confirm, oracle(m))
 				}
-				text, _ := confirmLines(m, 300, 400)
-				all := strings.Join(text, "\n")
-				for _, p := range m.Confirm {
-					if !strings.Contains(all, p) {
-						t.Fatalf("seq %d step %d: the confirmation does not list %s", seq, step, p)
-					}
-				}
+				checkConfirmText(t, fmt.Sprintf("seq %d step %d", seq, step), m, want)
 			}
 		}
 	}

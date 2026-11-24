@@ -163,6 +163,25 @@ func nextPlacesSort(k SortKey) SortKey {
 	return SortSize
 }
 
+// placesSortName names the order of the places; the flat list's age sort shows as the size sort there.
+func placesSortName(k SortKey) string {
+	switch k {
+	case SortUpdated:
+		return sortNames[SortUpdated]
+	case SortPath:
+		return sortNames[SortPath]
+	}
+	return "ready + optional size, largest first"
+}
+
+// plural is "1 row", "2 rows".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // firstPlace is the index of the first place that has a selectable row, 0 when none has.
 func firstPlace(m Model) int {
 	for i, p := range m.places() {
@@ -290,6 +309,22 @@ func selectReadyIn(m Model, ps []place) Model {
 	return m
 }
 
+// selectReadyVisible is `a` inside a place: it selects the ready rows in view, never the optional switched-off ones.
+func selectReadyVisible(m Model) Model {
+	m.Selected = cloneSel(m.Selected)
+	n := 0
+	for _, r := range m.visible() {
+		if readyRow(r) {
+			m.Selected[r.Path] = true
+			n++
+		}
+	}
+	if n == 0 {
+		m.Status = "no ready rows here: space picks an optional row"
+	}
+	return m
+}
+
 // toggleView switches between the places and the flat list; the selection is not touched.
 func toggleView(m Model) Model {
 	m.Filter, m.PlacesFilter, m.Pinned = "", "", ""
@@ -407,7 +442,7 @@ func placesStatus(m Model, vis []place, w int) string {
 		}
 		return cut(s+". enter to look inside", w)
 	}
-	s := fmt.Sprintf("%d places, sorted by %s", len(vis), sortNames[m.Sort])
+	s := fmt.Sprintf("%s, sorted by %s", plural(len(vis), "place"), placesSortName(m.Sort))
 	if m.Filter != "" {
 		s = fmt.Sprintf("filter: %s (esc clears), %s", m.Filter, s)
 	}

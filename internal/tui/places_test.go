@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -394,6 +395,164 @@ func TestRescanDropsSelectedPathsThatAreNoLongerSelectable(t *testing.T) {
 	m, _ = Update(m, ScanDoneMsg{Rows: rows, Summary: placesSummary()})
 	if m.Selected["/home/user/.nvm/versions/node/v16.20.2"] || !m.Selected["/home/user/.nvm/versions/node/v18.0.0"] {
 		t.Fatalf("selected %v", m.Selected)
+	}
+}
+
+func confirmText(m Model) string { return strings.Join(View(m, 100, 30), "\n") }
+
+func TestConfirmSaysWhenRowsAreNotInTheListYouCameFrom(t *testing.T) {
+	// places: a search hides the place of one selected row
+	m, _ := keys(placesModel(), "a/nvm<enter>d")
+	if s := confirmText(m); m.Screen != ScreenConfirm || !strings.Contains(s, "1 of them are not shown in the list you came from.") {
+		t.Fatalf("places:\n%s", s)
+	}
+	// nothing hidden: no line
+	m, _ = keys(placesModel(), "ad")
+	if strings.Contains(confirmText(m), "not shown") {
+		t.Fatalf("a line for rows that are all in view:\n%s", confirmText(m))
+	}
+	// flat list, a search
+	m, _ = keys(listModel(), "a/docker<enter>d")
+	if s := confirmText(m); !strings.Contains(s, "4 of them are not shown") {
+		t.Fatalf("search:\n%s", s)
+	}
+	// flat list: o a o d leaves an optional row selected and hidden
+	m, _ = keys(listModel(), "oaod")
+	if s := confirmText(m); !strings.Contains(s, "1 of them are not shown") || !strings.Contains(s, "optional and currently switched off") {
+		t.Fatalf("o a o d:\n%s", s)
+	}
+	// space in place A, then place B: the entry of A shows its place, the rows of B do not
+	m, _ = keys(placesModel(), " j<enter>ad")
+	s := confirmText(m)
+	if m.Screen != ScreenConfirm || !strings.Contains(s, "1 of them are not shown") {
+		t.Fatalf("place A then B:\n%s", s)
+	}
+	for _, l := range strings.Split(s, "\n") {
+		switch {
+		case strings.Contains(l, "proj/node_modules") && !strings.Contains(l, pProj):
+			t.Fatalf("an entry outside the open place must show its place: %q", l)
+		case strings.Contains(l, ".nvm/versions/node/v") && strings.Contains(l, pProj):
+			t.Fatalf("an entry inside the open place must not: %q", l)
+		}
+	}
+}
+
+func manyRows(n int) []Row {
+	var rows []Row
+	for i := range n {
+		rows = append(rows, Row{Path: fmt.Sprintf("/s/p%02d", i), Bytes: 100, Source: SrcAuto, Category: "misc", RuleKey: "misc/x@1"})
+	}
+	return rows
+}
+
+func TestConfirmScrollsAndYConfirmsAtAnyPosition(t *testing.T) {
+	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: manyRows(40), Summary: placesSummary()})
+	m, _ = Update(m, ResizeMsg{Width: 80, Height: 24})
+	m, _ = keys(m, "ad")
+	if m.Screen != ScreenConfirm || len(m.Confirm) != 40 {
+		t.Fatalf("setup: %v %d", m.Screen, len(m.Confirm))
+	}
+	first := strings.Join(View(m, 80, 24), "\n")
+	if !strings.Contains(first, "Delete 40 items") || !strings.Contains(first, "rows 1-21 of 40") {
+		t.Fatalf("first page:\n%s", first)
+	}
+	shown := map[string]int{}
+	pages := 0
+	for {
+		pages++
+		for _, l := range confirmPage(m, 80, 24) {
+			shown[strings.TrimSpace(l[strings.LastIndex(l, " ")+1:])]++
+		}
+		if !strings.Contains(strings.Join(View(m, 80, 24), "\n"), "Delete 40 items") {
+			t.Fatal("the header must stay on every page")
+		}
+		next, _ := keys(m, "<pgdn>")
+		if next.ConfirmTop == m.ConfirmTop {
+			break
+		}
+		m = next
+	}
+	if end := strings.Join(View(m, 80, 24), "\n"); !strings.Contains(end, "rows 20-40 of 40") {
+		t.Fatalf("last page:\n%s", end)
+	}
+	for _, p := range m.Confirm {
+		if shown[p] == 0 {
+			t.Fatalf("%s is not reachable by scrolling", p)
+		}
+	}
+	// j, k and the arrows scroll one entry; y confirms at any position
+	up, _ := keys(m, "k<up>")
+	down, _ := keys(up, "j<down>")
+	if up.ConfirmTop != m.ConfirmTop-2 || down.ConfirmTop != m.ConfirmTop {
+		t.Fatalf("top: end %d, after k and up %d, after j and down %d", m.ConfirmTop, up.ConfirmTop, down.ConfirmTop)
+	}
+	mid, _ := keys(placesAfterScan(manyRows(40)), "ad<pgdn>")
+	if mid.ConfirmTop == 0 {
+		t.Fatal("did not scroll")
+	}
+	_, eff := keys(mid, "y")
+	if len(eff) != 1 || !reflect.DeepEqual(eff[0].(Delete).Paths, mid.Confirm) || len(mid.Confirm) != 40 {
+		t.Fatalf("y while scrolled: %v", eff)
+	}
+	// below 80x24 the keys stay refused
+	small, _ := Update(mid, ResizeMsg{Width: 70, Height: 20})
+	if _, eff := keys(small, "y"); len(eff) != 0 {
+		t.Fatalf("y in a small window: %v", eff)
+	}
+}
+
+func placesAfterScan(rows []Row) Model {
+	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: placesSummary()})
+	m, _ = Update(m, ResizeMsg{Width: 80, Height: 24})
+	return m
+}
+
+func TestExclusionDuringDeleteKeepsThePlacesCursor(t *testing.T) {
+	m, _ := keys(placesModel(), "j dy")
+	if m.Screen != ScreenResult || !m.Result.Pending {
+		t.Fatalf("setup: %v", m.Screen)
+	}
+	m, _ = Update(m, ExclusionChangedMsg{Path: "/home/user/proj/node_modules", Excluded: true})
+	if m.Cursor >= len(m.places()) || cursorPlaceName(t, m) != pNVM { // the place keeps the cursor, wherever it sorts now
+		t.Fatalf("cursor %d of %d places, on %q", m.Cursor, len(m.places()), cursorPlaceName(t, m))
+	}
+	// the last place, with many flat rows before it: the cursor must stay a place index
+	many := manyRows(30)
+	m, _ = Update(NewModel(true), ScanDoneMsg{Rows: append(many, Row{Path: "/zz/last", Bytes: 1, Source: SrcAuto}), Summary: placesSummary()})
+	m, _ = keys(m, "jdy")
+	m, _ = Update(m, ExclusionChangedMsg{Path: "/s/p03", Excluded: true})
+	if m.Cursor >= len(m.places()) {
+		t.Fatalf("cursor %d past the %d places", m.Cursor, len(m.places()))
+	}
+}
+
+func TestAInAPlaceSelectsReadyRowsOnly(t *testing.T) {
+	m, _ := keys(placesModel(), "jj<enter>a") // ~/old/ holds only an optional row
+	if len(m.Selected) != 0 || !strings.Contains(m.Status, "no ready rows") {
+		t.Fatalf("optional-only place: %v %q", m.Selected, m.Status)
+	}
+	rows := []Row{
+		{Path: "/home/user/mix/a", Bytes: 10, Source: SrcAuto},
+		{Path: "/home/user/mix/b", Bytes: 20, Source: SrcOptionalOn},
+		{Path: "/home/user/mix/c", Bytes: 30, Source: SrcOptionalOff},
+	}
+	mix, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: placesSummary()})
+	mix, _ = keys(mix, "<enter>a")
+	if !reflect.DeepEqual(mix.Selected, map[string]bool{"/home/user/mix/a": true, "/home/user/mix/b": true}) {
+		t.Fatalf("selected %v", mix.Selected)
+	}
+}
+
+func TestStatusLinesSayOneRowAndTheirOwnSort(t *testing.T) {
+	m, _ := keys(placesModel(), "jj<enter>") // ~/old/ has one row
+	if s := screen(m); !strings.Contains(s, "1 row, sorted by") || strings.Contains(s, "1 rows") {
+		t.Fatalf("place status:\n%s", s)
+	}
+	p := placesModel()
+	p.Sort = SortAge
+	p, _ = keys(p, "/zzz<enter>")
+	if s := screen(p); !strings.Contains(s, "0 places, sorted by ready + optional size") || strings.Contains(s, "age, oldest") {
+		t.Fatalf("places status:\n%s", s)
 	}
 }
 

@@ -146,7 +146,7 @@ func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
 			}
 		}
 	}
-	if m.Screen == ScreenPlaces {
+	if m.listScreen() == ScreenPlaces { // also while a deletion runs (Screen result, Back places)
 		return m.keepPlaceOn(curPlace.Name)
 	}
 	m = m.keepCursorOn(cur.Path, curOK)
@@ -237,6 +237,8 @@ func listKeyInner(m Model, k KeyMsg) (Model, []Effect) {
 		return m, []Effect{Quit{}}
 	case k.Rune == '/':
 		m.Filtering = true
+	case k.Rune == 'a' && m.Screen == ScreenPlace:
+		m = selectReadyVisible(m)
 	case k.Rune == 'a':
 		m = selectAll(m)
 	case k.Rune == 's':
@@ -303,6 +305,7 @@ func openConfirm(m Model) (Model, []Effect) {
 		return m, nil
 	}
 	m.Confirm = deletePaths(sel)
+	m.ConfirmTop = 0
 	if m.Screen != ScreenDetail {
 		m.Back = m.Screen
 	}
@@ -374,12 +377,10 @@ func confirmKey(m Model, k KeyMsg) (Model, []Effect) {
 		if m.small() {
 			return m, nil
 		}
-		if w, h := m.size(); !slices.Equal(m.Confirm, deletePaths(m.selected())) || m.Summary.Paused {
+		if !slices.Equal(m.Confirm, deletePaths(m.selected())) || m.Summary.Paused {
 			m.Screen, m.Confirm = m.listScreen(), nil
 			m.Status = "the selection changed: nothing deleted"
 			return m, nil
-		} else if _, truncated := confirmLines(m, w, h); truncated {
-			return m, nil // the list does not fit: enlarge the window
 		}
 		paths := slices.Clone(m.Confirm)
 		m.Screen = ScreenResult
@@ -388,6 +389,28 @@ func confirmKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Rune == 'n' || k.Special == KeyEsc || k.Rune == 'q':
 		m.Screen = m.listScreen()
 		m.Confirm = nil
+	case k.Special == KeyUp || k.Rune == 'k':
+		m.ConfirmTop = scrolled(m, -1)
+	case k.Special == KeyDown || k.Rune == 'j':
+		m.ConfirmTop = scrolled(m, 1)
+	case k.Special == KeyPgUp:
+		m.ConfirmTop = scrolled(m, -confirmRoom(m))
+	case k.Special == KeyPgDn:
+		m.ConfirmTop = scrolled(m, confirmRoom(m))
 	}
 	return m, nil
+}
+
+// confirmRoom is how many entries the confirmation shows at once.
+func confirmRoom(m Model) int {
+	w, h := m.size()
+	head, _ := confirmParts(m, w)
+	return max(h-len(head)-1, 1)
+}
+
+// scrolled is the first confirmation entry after moving by delta, kept inside the list.
+func scrolled(m Model, delta int) int {
+	w, _ := m.size()
+	_, entries := confirmParts(m, w)
+	return min(max(m.ConfirmTop+delta, 0), max(len(entries)-confirmRoom(m), 0))
 }

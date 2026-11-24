@@ -37,6 +37,8 @@ const (
 	KeyEnter     = "enter"
 	KeyEsc       = "esc"
 	KeyBackspace = "backspace"
+	KeyPgUp      = "pgup"
+	KeyPgDn      = "pgdn"
 )
 
 // Msg is an input to Update.
@@ -158,6 +160,7 @@ type Model struct {
 	Status       string
 	Scan         []scanLine
 	Confirm      []string // the paths the confirmation was opened for; `y` revalidates them
+	ConfirmTop   int      // first confirmation entry shown (the list scrolls)
 	Result       Result
 	W, H         int // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
 }

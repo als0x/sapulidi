@@ -1,5 +1,5 @@
 +- summary -----------------------------------+ +- keys -----------------------+
-| agents installed: 2                         | | esc: back     d: delete      |
+| agents installed: 2                         | | esc: reset    d: delete      |
 | to remove: 0 B, 0 of 1 selected             | | / : search    s: sort        |
 | excluded: 0                                 | | enter: detail space: select  |
 | schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
