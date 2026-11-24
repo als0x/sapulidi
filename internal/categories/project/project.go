@@ -133,23 +133,47 @@ func (c *category) Scan(env *core.Env) ([]core.Candidate, []core.Kept, error) {
 				return nil
 			}
 			isDir, isFile := d.IsDir(), d.Type().IsRegular()
+			// Several rules can claim one name (target, build): try each in pack order, the first that
+			// passes wins; otherwise keep once, preferring a failure after the marker was found.
 			var rule *core.Rule
+			var newest time.Time
+			var failRule, offRule *core.Rule
+			var offNewest time.Time
+			var failErr error
+			matched := false
 			for i := range rules {
 				r := &rules[i]
-				if (r.Kind == core.KindProject && isDir || r.Kind == core.KindFile && isFile) && matches(r.Names, name) {
-					rule = r
-					break
+				if !((r.Kind == core.KindProject && isDir || r.Kind == core.KindFile && isFile) && matches(r.Names, name)) {
+					continue
+				}
+				matched = true
+				n, err := c.evaluate(env, *r, p)
+				if err == nil {
+					if env.Settings.RuleEnabled(r.Key()) {
+						rule, newest = r, n
+						break
+					}
+					// A switched-off rule is only a fallback: the engine drops its candidate.
+					if offRule == nil {
+						offRule, offNewest = r, n
+					}
+					continue
+				}
+				if failRule == nil || (isNoMarker(failErr) && !isNoMarker(err)) {
+					failRule, failErr = r, err
 				}
 			}
-			if rule == nil {
+			if !matched {
 				if isDir && matches(prune, name) {
 					return fs.SkipDir
 				}
 				return nil
 			}
-			newest, err := c.evaluate(env, *rule, p)
-			if err != nil {
-				kept = append(kept, keptOf(*rule, p, err))
+			if rule == nil && offRule != nil {
+				rule, newest = offRule, offNewest
+			}
+			if rule == nil {
+				kept = append(kept, keptOf(*failRule, p, failErr))
 			} else {
 				cands = append(cands, core.Candidate{
 					Category: c.name, RuleKey: rule.Key(), Path: p, Base: rp, Removal: core.RenameDelete,
@@ -163,6 +187,11 @@ func (c *category) Scan(env *core.Env) ([]core.Candidate, []core.Kept, error) {
 		}
 	}
 	return cands, kept, nil
+}
+
+func isNoMarker(err error) bool {
+	var ke *core.KeepError
+	return errors.As(err, &ke) && ke.Why == "no-marker"
 }
 
 func isCtxErr(err error) bool {
