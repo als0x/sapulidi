@@ -20,8 +20,12 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 			m.Status = "the list changed: confirm again"
 		}
 		m.Rows = dedupeRows(msg.Rows)
+		for i := range m.Rows {
+			m.Rows[i].Place = placeOfRow(m.Rows[i], msg.Summary.Roots, msg.Summary.Home)
+		}
 		m.Summary = msg.Summary
-		m.Screen = ScreenList
+		m.Screen, m.Back = ScreenPlaces, ScreenPlaces
+		m.Place, m.Filter, m.PlacesFilter, m.Filtering = "", "", "", false
 		m.Confirm = nil
 		sel := map[string]bool{}
 		for _, r := range m.Rows {
@@ -31,7 +35,7 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		}
 		m.Selected = sel
 		m.Pinned = ""
-		m.Cursor = firstSelectable(m) // the list opens on something that can be deleted
+		m.Cursor = firstPlace(m) // the places open on something that can be deleted
 		return m, nil
 	case DeleteDoneMsg:
 		return deleteDone(m, msg.Result), nil
@@ -88,17 +92,31 @@ func deleteDone(m Model, r Result) Model {
 	m.Result = r
 	m.Screen = ScreenResult
 	m.Confirm = nil
-	m.Cursor = clampCursor(m, m.Cursor)
+	switch m.listScreen() {
+	case ScreenPlace:
+		if len(m.visible()) == 0 { // the delete emptied the open place
+			m.Back = ScreenPlaces
+			m.Cursor = firstPlace(m)
+		} else {
+			m.Cursor = clampCursor(m, m.Cursor)
+		}
+	case ScreenPlaces:
+		m.Back = ScreenPlaces
+		m.Cursor = clampPlaceCursor(m, m.Cursor)
+	default:
+		m.Cursor = clampCursor(m, m.Cursor)
+	}
 	return m
 }
 
 func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
 	if m.Screen == ScreenConfirm {
-		m.Screen = ScreenList
+		m.Screen = m.listScreen()
 		m.Confirm = nil
 		m.Status = "an exclusion changed: confirm again"
 	}
 	cur, curOK := m.cursorRow()
+	curPlace, _ := m.cursorPlace()
 	m.Rows = slices.Clone(m.Rows)
 	for i, r := range m.Rows {
 		if r.Path != c.Path {
@@ -128,9 +146,12 @@ func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
 			}
 		}
 	}
+	if m.listScreen() == ScreenPlaces { // also while a deletion runs (Screen result, Back places)
+		return m.keepPlaceOn(curPlace.Name)
+	}
 	m = m.keepCursorOn(cur.Path, curOK)
 	if _, ok := m.cursorRow(); !ok && m.Screen == ScreenDetail {
-		m.Screen = ScreenList
+		m.Screen = m.listScreen()
 	}
 	return m
 }
@@ -151,11 +172,13 @@ func updateKey(m Model, k KeyMsg) (Model, []Effect) {
 	switch m.Screen {
 	case ScreenScanning:
 		if k.Special == KeyEsc {
-			m.Screen = ScreenList
+			m.Screen, m.Back = ScreenPlaces, ScreenPlaces
 			m.Status = "scan cancelled"
 			return m, []Effect{CancelScan{}}
 		}
-	case ScreenList:
+	case ScreenPlaces:
+		return placesKey(m, k)
+	case ScreenList, ScreenPlace:
 		return listKey(m, k)
 	case ScreenDetail:
 		return detailKey(m, k)
@@ -166,7 +189,7 @@ func updateKey(m Model, k KeyMsg) (Model, []Effect) {
 			return m, nil
 		}
 		if k.Special == KeyEsc || k.Special == KeyEnter || k.Rune == 'q' {
-			m.Screen = ScreenList
+			m.Screen = m.listScreen()
 		}
 	}
 	return m, nil
@@ -199,19 +222,29 @@ func listKeyInner(m Model, k KeyMsg) (Model, []Effect) {
 		m.Cursor = clampCursor(m, m.Cursor+1)
 	case k.Special == KeyEnter:
 		if _, ok := m.cursorRow(); ok {
-			m.Screen = ScreenDetail
+			m.Back, m.Screen = m.Screen, ScreenDetail
 		}
+	case k.Special == KeyEsc && m.Screen == ScreenPlace:
+		name := m.Place
+		m.Screen, m.Filter, m.PlacesFilter, m.Pinned = ScreenPlaces, m.PlacesFilter, "", ""
+		m = m.keepPlaceOn(name)
 	case k.Special == KeyEsc:
 		m.Filter = ""
 		m.Cursor = firstSelectable(m)
+	case k.Rune == 'c':
+		m = toggleView(m)
 	case k.Rune == 'q':
 		return m, []Effect{Quit{}}
 	case k.Rune == '/':
 		m.Filtering = true
+	case k.Rune == 'a' && m.Screen == ScreenPlace:
+		m = selectReadyVisible(m)
 	case k.Rune == 'a':
 		m = selectAll(m)
 	case k.Rune == 's':
 		m.Sort = (m.Sort + 1) % 4
+	case k.Rune == 'o' && m.Screen == ScreenPlace:
+		m.Status = "optional rows are always listed here"
 	case k.Rune == 'o':
 		m = toggleOptional(m)
 	case k.Rune == 'g':
@@ -272,6 +305,10 @@ func openConfirm(m Model) (Model, []Effect) {
 		return m, nil
 	}
 	m.Confirm = deletePaths(sel)
+	m.ConfirmTop = 0
+	if m.Screen != ScreenDetail {
+		m.Back = m.Screen
+	}
 	m.Screen = ScreenConfirm
 	return m, nil
 }
@@ -300,14 +337,6 @@ func selectAll(m Model) Model {
 func toggleOptional(m Model) Model {
 	cur, curOK := m.cursorRow()
 	m.ShowOptional = !m.ShowOptional
-	if !m.ShowOptional {
-		m.Selected = cloneSel(m.Selected)
-		for _, r := range m.Rows {
-			if r.origin() == SrcOptionalOff {
-				delete(m.Selected, r.Path)
-			}
-		}
-	}
 	return m.keepCursorOn(cur.Path, curOK)
 }
 
@@ -332,7 +361,7 @@ func filterKey(m Model, k KeyMsg) (Model, []Effect) {
 
 func detailKey(m Model, k KeyMsg) (Model, []Effect) {
 	if k.Special == KeyEsc || k.Special == KeyEnter || k.Rune == 'q' {
-		m.Screen = ScreenList
+		m.Screen = m.listScreen()
 		return m, nil
 	}
 	m, eff := rowAction(m, k)
@@ -348,20 +377,40 @@ func confirmKey(m Model, k KeyMsg) (Model, []Effect) {
 		if m.small() {
 			return m, nil
 		}
-		if w, h := m.size(); !slices.Equal(m.Confirm, deletePaths(m.selected())) || m.Summary.Paused {
-			m.Screen, m.Confirm = ScreenList, nil
+		if !slices.Equal(m.Confirm, deletePaths(m.selected())) || m.Summary.Paused {
+			m.Screen, m.Confirm = m.listScreen(), nil
 			m.Status = "the selection changed: nothing deleted"
 			return m, nil
-		} else if _, truncated := confirmLines(m, w, h); truncated {
-			return m, nil // the list does not fit: enlarge the window
 		}
 		paths := slices.Clone(m.Confirm)
 		m.Screen = ScreenResult
 		m.Result = Result{Pending: true}
 		return m, []Effect{Delete{Paths: paths}}
 	case k.Rune == 'n' || k.Special == KeyEsc || k.Rune == 'q':
-		m.Screen = ScreenList
+		m.Screen = m.listScreen()
 		m.Confirm = nil
+	case k.Special == KeyUp || k.Rune == 'k':
+		m.ConfirmTop = scrolled(m, -1)
+	case k.Special == KeyDown || k.Rune == 'j':
+		m.ConfirmTop = scrolled(m, 1)
+	case k.Special == KeyPgUp:
+		m.ConfirmTop = scrolled(m, -confirmRoom(m))
+	case k.Special == KeyPgDn:
+		m.ConfirmTop = scrolled(m, confirmRoom(m))
 	}
 	return m, nil
+}
+
+// confirmRoom is how many entries the confirmation shows at once.
+func confirmRoom(m Model) int {
+	w, h := m.size()
+	head, _ := confirmParts(m, w)
+	return max(h-len(head)-1, 1)
+}
+
+// scrolled is the first confirmation entry after moving by delta, kept inside the list.
+func scrolled(m Model, delta int) int {
+	w, _ := m.size()
+	_, entries := confirmParts(m, w)
+	return min(max(m.ConfirmTop+delta, 0), max(len(entries)-confirmRoom(m), 0))
 }

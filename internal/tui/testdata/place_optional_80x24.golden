@@ -1,0 +1,24 @@
++- summary -----------------------------------+ +- keys -----------------------+
+| agents installed: 2                         | | esc: places   d: delete      |
+| to remove: 0 B, 0 of 4 selected             | | / : search    s: sort        |
+| excluded: 2                                 | | enter: detail space: select  |
+| schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
+| disk free: 37.3 GB -> 37.3 GB               | | g: guarded    c: view        |
+| kept: 3 | g                                 | | q: quit                      |
++---------------------------------------------+ +------------------------------+
+          size path                            age   updatedAt  source          
+>[ ]  762.9 MB /home/user/old/node_modules     2y    2025-02-03 optional-off    
+
+
+
+
+
+
+
+
+
+
+
+
+
+~/old/ 1 row, sorted by size, largest first

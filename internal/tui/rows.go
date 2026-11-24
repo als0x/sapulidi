@@ -26,6 +26,7 @@ type Row struct {
 	Origin   string // the source at scan time; restored when an exclusion is removed ("" = unknown)
 	Category string
 	RuleKey  string
+	Place    string   // the place the row is listed under, set when the scan arrives
 	Why      string   // why it is a candidate
 	Block    string   // when set, the row cannot be selected and this is the reason
 	Guards   []string // guards that passed, with their numbers
@@ -85,6 +86,9 @@ func (r Row) reason() string {
 // hidden reports a row the default view leaves out: kept rows until `g`, optional-off rows until `o`. An excluded
 // row is always shown so that it can be un-excluded.
 func (m Model) hidden(r Row) bool {
+	if ls := m.listScreen(); ls == ScreenPlace || ls == ScreenPlaces { // optional rows are always listed there
+		return r.Source == SrcKept && !m.ShowKept && r.Guard != guardRefresh
+	}
 	switch {
 	case r.Source == SrcExcluded, m.Pinned != "" && r.Path == m.Pinned:
 		return false
@@ -185,8 +189,9 @@ func sourceText(r Row, plain bool) string {
 func (m Model) visible() []Row {
 	out := make([]Row, 0, len(m.Rows))
 	f := strings.ToLower(m.Filter)
+	inPlace := m.listScreen() == ScreenPlace
 	for _, r := range m.Rows {
-		if m.hidden(r) {
+		if m.hidden(r) || inPlace && r.Place != m.Place {
 			continue
 		}
 		if f != "" && !matches(r, f) {
@@ -274,15 +279,31 @@ func cmpTime(a, b time.Time) int {
 	return 0
 }
 
-// selected returns the selected rows that are in view, in list order.
+// selected returns every selected row that can be deleted, whatever the screen, the search, `o` and `g` show: the
+// selection belongs to the whole scan. The order is fixed (largest first, then path), never the view's.
 func (m Model) selected() []Row {
 	var out []Row
-	for _, r := range m.visible() {
+	for _, r := range m.Rows {
 		if m.Selected[r.Path] && r.selectable() {
 			out = append(out, r)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return less(SortSize, out[i], out[j]) })
 	return out
+}
+
+// listScreen is the list the model is on: the screen itself, or for detail, confirmation and result the one they
+// return to.
+func (m Model) listScreen() Screen {
+	switch m.Screen {
+	case ScreenList, ScreenPlaces, ScreenPlace:
+		return m.Screen
+	}
+	switch m.Back {
+	case ScreenPlaces, ScreenPlace:
+		return m.Back
+	}
+	return ScreenList
 }
 
 // sumBytes adds the known sizes and counts the rows of unknown size.

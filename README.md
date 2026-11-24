@@ -42,12 +42,17 @@ the scheduled run (`--schedule off` removes it, `--schedule` alone shows it), fo
 
 ## The TUI
 
-Run `sapulidi` with no arguments in a terminal. It scans, lists what it found by category and size, and lets you
-pick what to delete; every deletion still goes through the engine and its safety checks. Keys: `up`/`down` move,
-`enter` detail, `space` select, `a` select all, `d` delete the selection, `x` exclude, `o` show optional
-categories, `g` show the rows kept by a guard (guarded, with the reason), `/` search, `s` sort, `esc` back, `q` quit. The
-screen opens on what is ready to delete; the summary says how many optional and kept rows are hidden. It is for a
-person in a terminal; an agent uses `plan` and `report`.
+Run `sapulidi` with no arguments in a terminal. It scans and opens on a list of **places**: the folders where it
+found something (a project, a toolchain folder), with what is ready to delete, what is optional, what a guard keeps
+and when it last changed. `enter` opens a place and lists its rows; every deletion still goes through the engine and
+its safety checks. Keys: `up`/`down` move, `enter` open a place or a row's detail, `space` select (on a place: every
+ready row in it, never the optional ones), `a` select all (on the places and inside a place: ready rows only, never the optional ones; in the flat list: every row in
+view), `d` delete the selection (its confirmation scrolls with `up`/`down`, `j`/`k`, `PgUp`/`PgDn`), `x` exclude, `c` switch between the places and the flat list, `o` show optional rows in the flat list
+(places always list them), `g` show what a guard keeps (guarded, with the reason; on the places it also lists
+places that hold only kept rows), `/` search, `s` sort, `esc` back, `q` quit. The selection belongs to the whole
+scan, not to the screen: switching views, `o`, `g`, search and sort never change it, and the confirmation lists
+every selected row, including the ones the current view hides. It is for a person in a terminal; an agent uses
+`plan` and `report`.
 
 ## Exclusions
 

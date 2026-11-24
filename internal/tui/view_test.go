@@ -31,7 +31,7 @@ func pausedModel() Model {
 	s := fixtureSummary()
 	s.Paused = true
 	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: s})
-	return m
+	return flat(m)
 }
 
 func resultModel() Model {
@@ -50,7 +50,7 @@ func emptyModel() Model {
 		{Path: "/home/user/work/repo/.venv", Bytes: -1, Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1"},
 	}
 	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
-	return m
+	return flat(m)
 }
 
 func script(s string) func() Model {

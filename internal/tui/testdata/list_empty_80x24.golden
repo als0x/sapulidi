@@ -1,10 +1,10 @@
 +- summary -----------------------------------+ +- keys -----------------------+
-| agents installed: 2                         | | esc: back     d: delete      |
-| to remove: 0 B, 0 of 0 selected             | | / : search    s: sort        |
+| agents installed: 2                         | | esc: reset    d: delete      |
+| to remove: 0 B, 0 of 1 selected             | | / : search    s: sort        |
 | excluded: 0                                 | | enter: detail space: select  |
 | schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
 | disk free: 37.3 GB -> 37.3 GB               | | o: optional   g: guarded     |
-| optional (off): 1 | 762.9 MB | o            | | q: quit                      |
+| optional (off): 1 | 762.9 MB | o            | | q: quit       c: view        |
 | kept: 1 | g                                 | +------------------------------+
 +---------------------------------------------+                                 
           size path                            age   updatedAt  source          

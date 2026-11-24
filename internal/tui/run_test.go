@@ -235,6 +235,8 @@ func finish(t *testing.T, done chan error) error {
 func TestScriptedSessionDeletesExactlyTheSelection(t *testing.T) {
 	ft, d := newFakes()
 	done := start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.keys(" ") // select /cache/a (largest first)
 	ft.special(term.KeyDown)
@@ -287,6 +289,8 @@ func TestPausedRefusesDelete(t *testing.T) {
 	ft, d := newFakes()
 	d.sum.Paused = true
 	done := start(d)
+	ft.waitFor(t, "/cache/")
+	ft.keys("c")
 	ft.waitFor(t, "/cache/a")
 	ft.keys(" d")
 	ft.waitFor(t, "paused")
@@ -303,6 +307,8 @@ func TestPathKeptByAGuardIsReported(t *testing.T) {
 		return Result{Removed: paths[:1], Kept: []KeptItem{{Path: paths[1], Why: "open"}}}
 	}
 	done := start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.keys(" ")
 	ft.special(term.KeyDown)
@@ -325,6 +331,8 @@ func TestSmallWindowDisablesDelete(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	ft.setSize(100, 30)
 	ft.events <- term.Resize{Cols: 100, Rows: 30}
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	if strings.Contains(ft.screen(), "[x]") || strings.Contains(ft.screen(), "Delete") {
 		t.Fatalf("a key worked in a small window:\n%s", ft.screen())
@@ -340,6 +348,8 @@ func TestExclusionErrorIsShownAndNothingChanges(t *testing.T) {
 	ft, d := newFakes()
 	d.exclErr = errors.New("exclude.toml is corrupt")
 	done := start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.keys("x")
 	ft.waitFor(t, "exclude.toml is corrupt")
@@ -365,6 +375,8 @@ func TestPanicInUpdateRestoresOnce(t *testing.T) {
 		defer func() { done <- recover() }()
 		Run(context.Background(), d)
 	}()
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.keys("z")
 	select {
@@ -385,6 +397,8 @@ func TestContextCancelAndCtrlCRestoreOnce(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, d) }()
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	cancel()
 	if err := finish(t, done); !errors.Is(err, context.Canceled) {
@@ -396,6 +410,8 @@ func TestContextCancelAndCtrlCRestoreOnce(t *testing.T) {
 
 	ft, d = newFakes()
 	done = start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.events <- term.Key{Rune: 'c', Ctrl: true}
 	if err := finish(t, done); err != nil {
@@ -500,6 +516,8 @@ func TestEngineDepsDeleteRefusals(t *testing.T) {
 // selectDelete selects the first row and confirms the deletion: the engine call is then in flight.
 func selectDelete(t *testing.T, ft *fakeTerm) {
 	t.Helper()
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.keys(" dy")
 	ft.waitFor(t, "deleting...")
@@ -538,6 +556,8 @@ func TestSignalDuringDeletionFinishesItBeforeExit(t *testing.T) {
 func TestSignalWithoutDeletionReturnsAtOnce(t *testing.T) {
 	ft, d := newFakes()
 	done := start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	begin := time.Now()
 	ft.signal(syscall.SIGTERM)
@@ -581,6 +601,8 @@ func TestSizeErrorKeepsDeleteOff(t *testing.T) {
 	ft, d := newFakes()
 	ft.sizeErr = true
 	done := start(d)
+	ft.waitFor(t, "enter to look inside")
+	ft.keys("c")
 	ft.waitFor(t, "/cache/a")
 	ft.keys(" d")
 	time.Sleep(100 * time.Millisecond)
@@ -597,6 +619,8 @@ func TestSizeErrorKeepsDeleteOff(t *testing.T) {
 func TestResizeIsReadAgainWhenDrawing(t *testing.T) {
 	ft, d := newFakes()
 	done := start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.setSize(70, 20) // the SIGWINCH event was lost: only the next key draws
 	ft.keys("j")
@@ -642,6 +666,8 @@ func TestPanicInDeleteGoroutineIsReported(t *testing.T) {
 	ft, d := newFakes()
 	done := make(chan error, 1)
 	go func() { done <- Run(context.Background(), panicDeps{fakeDeps: d, deletePanic: true}) }()
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.keys(" dy")
 	ft.waitFor(t, "deletion failed: delete boom")
@@ -654,6 +680,8 @@ func TestPanicInDeleteGoroutineIsReported(t *testing.T) {
 func TestTerminalReadErrorEndsRun(t *testing.T) {
 	ft, d := newFakes()
 	done := start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	ft.events <- term.Closed{}
 	if err := finish(t, done); err == nil {
@@ -665,6 +693,8 @@ func TestTerminalReadErrorEndsRun(t *testing.T) {
 	// a closed events channel ends it the same way
 	ft, d = newFakes()
 	done = start(d)
+	ft.waitFor(t, "enter to look inside") // the places screen
+	ft.keys("c")                          // to the flat list
 	ft.waitFor(t, "3 rows")
 	close(ft.events)
 	if err := finish(t, done); err == nil {
@@ -679,6 +709,8 @@ func TestExclusionOfANonPathIsRefused(t *testing.T) {
 		Row{Path: "/cache/star*", Bytes: 1, Source: SrcAuto},
 		Row{Path: "relative/dir", Bytes: 1, Source: SrcAuto})
 	done := start(d)
+	ft.waitFor(t, "enter to look inside")
+	ft.keys("c")
 	ft.waitFor(t, "/cache/a")
 	// order: a, b, c (300, 200, 100), then the 1-byte rows by path (star, relative), then the unknown size
 	ft.keys("jjjx") // star*

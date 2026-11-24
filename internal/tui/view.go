@@ -21,6 +21,8 @@ func View(m Model, width, height int) []string {
 		lines = tooSmall(width, height)
 	case m.Screen == ScreenScanning:
 		lines = viewScanning(m, width, height)
+	case m.Screen == ScreenPlaces:
+		lines = viewPlaces(m, width, height)
 	case m.Screen == ScreenDetail:
 		lines = viewDetail(m, width, height)
 	case m.Screen == ScreenConfirm:
@@ -114,12 +116,12 @@ func viewScanning(m Model, w, h int) []string {
 }
 
 var keyHelp = [][2]string{
-	{"esc: back", "d: delete"},
+	{"esc: reset", "d: delete"},
 	{"/ : search", "s: sort"},
 	{"enter: detail", "space: select"},
 	{"x: exclude", "a: select all"},
 	{"o: optional", "g: guarded"},
-	{"q: quit", ""},
+	{"q: quit", "c: view"},
 }
 
 // hiddenLines are the summary lines that say what the default list leaves out; none when nothing is hidden.
@@ -166,7 +168,7 @@ func summaryLines(m Model) []string {
 			excluded++
 		}
 	}
-	for _, r := range m.visible() {
+	for _, r := range m.Rows { // the selection is global: so is the count it is shown against
 		if r.selectable() {
 			selectable++
 		}
@@ -202,15 +204,46 @@ func summaryLines(m Model) []string {
 	return append(lines, hiddenLines(m)...)
 }
 
-func viewList(m Model, w, h int) []string {
+// placesKeyHelp is the keys panel of the places screen: no `o`, optional rows are always listed.
+var placesKeyHelp = [][2]string{
+	{"q: quit", "d: delete"},
+	{"/ : search", "s: sort"},
+	{"enter: open", "space: select"},
+	{"c: view", "a: select all"},
+	{"g: guarded", "esc: reset"},
+}
+
+// placeKeyHelp is the keys panel inside a place.
+var placeKeyHelp = [][2]string{
+	{"esc: places", "d: delete"},
+	{"/ : search", "s: sort"},
+	{"enter: detail", "space: select"},
+	{"x: exclude", "a: select all"},
+	{"g: guarded", "c: view"},
+	{"q: quit", ""},
+}
+
+// topPanels draws the summary and the keys of the screen side by side.
+func topPanels(m Model, w int) []string {
 	rw := max(32, w/3)
 	lw := w - rw - 1
 	left := panel(m.Plain, "summary", summaryLines(m), lw)
-	keys := make([]string, len(keyHelp))
-	for i, k := range keyHelp {
+	help := keyHelp
+	switch m.Screen {
+	case ScreenPlaces:
+		help = placesKeyHelp
+	case ScreenPlace:
+		help = placeKeyHelp
+	}
+	keys := make([]string, len(help))
+	for i, k := range help {
 		keys[i] = fit(k[0], 14) + k[1]
 	}
-	lines := sideBySide(left, panel(m.Plain, "keys", keys, rw), lw, rw)
+	return sideBySide(left, panel(m.Plain, "keys", keys, rw), lw, rw)
+}
+
+func viewList(m Model, w, h int) []string {
+	lines := topPanels(m, w)
 
 	pw := w - 49
 	head := " " + "    " + fitRight("size", 9) + " " + fit("path", pw) + " " + fit("age", 5) + " " + fit("updatedAt", 10) + " " + fit("source", 16)
@@ -273,7 +306,10 @@ func statusLine(m Model, vis []Row, w int) string {
 	if r, ok := m.cursorRow(); ok && !r.selectable() {
 		return cut(r.reason(), w)
 	}
-	s := fmt.Sprintf("%d rows, sorted by %s", len(vis), sortNames[m.Sort])
+	s := fmt.Sprintf("%s, sorted by %s", plural(len(vis), "row"), sortNames[m.Sort])
+	if m.Screen == ScreenPlace {
+		s = placeText(m, m.Place) + " " + s
+	}
 	if m.Filter != "" {
 		s = fmt.Sprintf("filter: %s (esc clears), %s", m.Filter, s)
 	}
@@ -366,10 +402,36 @@ func withFooter(lines []string, footer string, w, h int) []string {
 	return append(out, cut(footer, w))
 }
 
-// confirmLines draws the confirmation for the rows selected now. truncated is true when the window is too small to
-// list every item (and every container id of a group): the list then ends with an "and N more" line and `y` is
-// refused until the window is larger.
-func confirmLines(m Model, w, h int) (lines []string, truncated bool) {
+// notInView returns the rows that the list the confirmation came from does not show: not among the visible rows (the
+// flat list, an open place) or not in a listed place (the places).
+func (m Model) notInView(rows []Row) []Row {
+	var out []Row
+	if m.listScreen() == ScreenPlaces {
+		shown := map[string]bool{}
+		for _, p := range m.places() {
+			shown[p.Name] = true
+		}
+		for _, r := range rows {
+			if !shown[r.Place] {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	shown := map[string]bool{}
+	for _, r := range m.visible() {
+		shown[r.Path] = true
+	}
+	for _, r := range rows {
+		if !shown[r.Path] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// confirmParts is the confirmation's always-visible header and its scrolling entries, for the rows selected now.
+func confirmParts(m Model, w int) (head, entries []string) {
 	rows := m.selected()
 	paths := deletePaths(rows)
 	var optOff int
@@ -383,33 +445,45 @@ func confirmLines(m Model, w, h int) (lines []string, truncated bool) {
 	if len(paths) == 1 {
 		noun = "item"
 	}
-	lines = []string{fmt.Sprintf("Delete %d %s, %s in total?", len(paths), noun, sizeText(known, unknown))}
+	head = []string{fmt.Sprintf("Delete %d %s, %s in total?", len(paths), noun, sizeText(known, unknown))}
 	if optOff > 0 {
-		lines = append(lines, fmt.Sprintf("%d of them are optional and currently switched off.", optOff))
+		head = append(head, fmt.Sprintf("%d of them are optional and currently switched off.", optOff))
 	}
-	lines = append(lines, "")
-	var entries []string
+	if n := len(deletePaths(m.notInView(rows))); n > 0 {
+		head = append(head, fmt.Sprintf("%d of them are not shown in the list you came from.", n))
+	}
+	head = append(head, "")
+	inPlace := m.listScreen() == ScreenPlace
 	for _, r := range rows {
+		where := ""
+		if inPlace && r.Place != m.Place {
+			where = " " + shorten(placeText(m, r.Place), 24)
+		}
 		if len(r.Members) == 0 {
-			entries = append(entries, "  "+fitRight(fmtBytes(r.Bytes), 9)+"  "+shorten(r.Path, w-13))
+			entries = append(entries, "  "+fitRight(fmtBytes(r.Bytes), 9)+"  "+shorten(r.Path, w-13-cols(where))+where)
 			continue
 		}
-		entries = append(entries, "  "+fitRight(fmtBytes(r.Bytes), 9)+"  "+shorten(r.Path, w-25)+fmt.Sprintf(" (%d containers)", len(r.Members)))
+		entries = append(entries, "  "+fitRight(fmtBytes(r.Bytes), 9)+"  "+shorten(r.Path, w-25-cols(where))+fmt.Sprintf(" (%d containers)", len(r.Members))+where)
 		for _, id := range r.Members {
 			entries = append(entries, "      "+shorten(id, w-6))
 		}
 	}
-	room := h - len(lines) - 1
-	if len(entries) > room {
-		truncated = true
-		entries = append(entries[:max(room-1, 0)], fmt.Sprintf("  ... and %d more", len(entries)-max(room-1, 0)))
-	}
-	lines = append(lines, entries...)
+	return head, entries
+}
+
+// confirmLines draws the confirmation for the rows selected now. The header stays; the entries scroll from
+// m.ConfirmTop, and more is true when they do not all fit.
+func confirmLines(m Model, w, h int) (lines []string, more bool) {
+	head, entries := confirmParts(m, w)
+	room := max(h-len(head)-1, 1)
+	top := min(max(m.ConfirmTop, 0), max(len(entries)-room, 0))
+	end := min(top+room, len(entries))
+	lines = append(head, entries[top:end]...)
 	footer := "y/enter: delete  n/esc: cancel"
-	if truncated {
-		footer = "too many items for this window: enlarge it to confirm  n/esc: cancel"
+	if more = len(entries) > room; more {
+		footer = fmt.Sprintf("rows %d-%d of %d  up/down: scroll  y: delete  n/esc: cancel", top+1, end, len(entries))
 	}
-	return withFooter(lines, footer, w, h), truncated
+	return withFooter(lines, footer, w, h), more
 }
 
 func viewResult(m Model, w, h int) []string {

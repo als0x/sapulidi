@@ -1,10 +1,10 @@
 +- summary -------------------------------------------------------------------+ +- keys -------------------------------+
-| agents installed: 2                                                         | | esc: back     d: delete              |
-| to remove: 0 B, 0 of 5 selected                                             | | / : search    s: sort                |
+| agents installed: 2                                                         | | esc: reset    d: delete              |
+| to remove: 0 B, 0 of 6 selected                                             | | / : search    s: sort                |
 | excluded: 1                                                                 | | enter: detail space: select          |
 | schedule: every 30m, next 14:30                                             | | x: exclude    a: select all          |
 | disk free: 37.3 GB -> 37.3 GB                                               | | o: optional   g: guarded             |
-| optional (off): 1 | 762.9 MB | o                                            | | q: quit                              |
+| optional (off): 1 | 762.9 MB | o                                            | | q: quit       c: view                |
 +-----------------------------------------------------------------------------+ +--------------------------------------+
           size path                                                                    age   updatedAt  source          
  [ ]    2.9 GB /home/user/.cache/go-build                                              22mo  2026-11-01 auto            

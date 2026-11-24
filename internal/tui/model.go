@@ -11,10 +11,12 @@ type Screen int
 // The screens.
 const (
 	ScreenScanning Screen = iota
-	ScreenList
+	ScreenList            // the flat candidate list
 	ScreenDetail
 	ScreenConfirm
 	ScreenResult
+	ScreenPlaces // the start screen after the scan: one row per place
+	ScreenPlace  // the rows of Model.Place
 )
 
 // SortKey is the list order.
@@ -35,6 +37,8 @@ const (
 	KeyEnter     = "enter"
 	KeyEsc       = "esc"
 	KeyBackspace = "backspace"
+	KeyPgUp      = "pgup"
+	KeyPgDn      = "pgdn"
 )
 
 // Msg is an input to Update.
@@ -114,6 +118,8 @@ type SummaryData struct {
 	Next     time.Time     // next scheduled run; zero = unknown
 	FreeNow  uint64        // free disk bytes now; 0 = unknown
 	Paused   bool          // the pause file exists
+	Roots    []string      // project roots of the scan; a row under one belongs to the longest match
+	Home     string        // the home directory, shown as ~ in places
 }
 
 // Result is what the engine reported for a deletion.
@@ -148,9 +154,13 @@ type Model struct {
 	Sort         SortKey
 	Filter       string
 	Filtering    bool
+	Place        string // the open place (ScreenPlace, and the detail or confirmation opened from it)
+	PlacesFilter string // the places search, kept while a place is open
+	Back         Screen // the list screen that detail, confirmation and result return to
 	Status       string
 	Scan         []scanLine
 	Confirm      []string // the paths the confirmation was opened for; `y` revalidates them
+	ConfirmTop   int      // first confirmation entry shown (the list scrolls)
 	Result       Result
 	W, H         int // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
 }
