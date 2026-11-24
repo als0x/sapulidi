@@ -191,6 +191,8 @@ func summaryLines(m Model) []string {
 }
 
 // headline answers the first question: how much can go now, how much if the user chooses, how much is protected.
+// The three numbers come from m.Rows. A wholesale command row and an excluded row are in none of them: neither can be
+// deleted from here. A separate excluded count would not fit the 76 columns of the box at 80x24 next to them.
 func headline(m Model) string {
 	var autoB, optB int64
 	var autoU, optU bool
@@ -212,18 +214,37 @@ func headline(m Model) string {
 
 // unknownLine is the summary line of the folders no rule covers; "" when there are none and the search finished.
 func unknownLine(m Model) string {
+	switch m.UnkState {
+	case UnkSearching:
+		return "not covered by any rule: searching" + ellipsis(m.Plain)
+	case UnkCancelled:
+		return "not covered by any rule: search cancelled"
+	}
 	if len(m.Summary.Unknown) == 0 && !m.Summary.UnknownPartial {
 		return ""
 	}
-	var total int64
-	for _, u := range m.Summary.Unknown {
-		total += u.Bytes
-	}
-	s := fmt.Sprintf("not covered by any rule: %s %s %s", plural(len(m.Summary.Unknown), "folder"), dot(m.Plain), fmtBytes(total))
+	s := fmt.Sprintf("not covered by any rule: %s %s %s", plural(len(m.Summary.Unknown), "folder"), dot(m.Plain), unknownTotal(m))
 	if m.Summary.UnknownPartial {
 		s += " partial"
 	}
 	return s + "  (u)"
+}
+
+func ellipsis(plain bool) string {
+	if plain {
+		return "..."
+	}
+	return "…"
+}
+
+// unknownTotal is the total size of the uncovered folders; a partial search only gives lower bounds, so it ends in
+// "+" like every other size that is not final.
+func unknownTotal(m Model) string {
+	var total int64
+	for _, u := range m.Summary.Unknown {
+		total += u.Bytes
+	}
+	return sizeCell(1, total, m.Summary.UnknownPartial)
 }
 
 // legend explains the words of the list; first is the word of the removable-now column ("ready" or "auto").
@@ -245,7 +266,7 @@ func footerOf(m Model) string {
 	case ScreenPlace:
 		return join("esc back", "enter detail", "space select", "x exclude", "d delete", "? help", "q quit")
 	case ScreenHelp:
-		return join("up/down scroll", "esc or ? close")
+		return join("up/down scroll", "esc or ? close", "q quit")
 	case ScreenUnknown:
 		return join("up/down scroll", "esc back", "? help", "q quit")
 	}

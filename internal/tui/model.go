@@ -83,6 +83,33 @@ func (ScanProgressMsg) isMsg()     {}
 func (ScanDoneMsg) isMsg()         {}
 func (DeleteDoneMsg) isMsg()       {}
 func (ExclusionChangedMsg) isMsg() {}
+func (UncoveredMsg) isMsg()        {}
+
+// UncoveredMsg ends the second phase of the scan: the big folders no rule covers. Partial is set when the search ran
+// out of time or was cut short, so the sizes are lower bounds. It is dropped unless the search is still wanted.
+type UncoveredMsg struct {
+	Unknown []Uncovered
+	Partial bool
+}
+
+// UnkState is where the search for uncovered folders stands. The zero value is a finished search.
+type UnkState int
+
+// The states of the uncovered-folder search.
+const (
+	UnkDone      UnkState = iota
+	UnkSearching          // started after the places appeared; its message has not come yet
+	UnkCancelled          // the user pressed esc on the places: a late message is ignored
+)
+
+// StartUncovered asks for the uncovered-folder search (the second phase) to begin.
+type StartUncovered struct{}
+
+// CancelUncovered asks for the running uncovered-folder search to stop.
+type CancelUncovered struct{}
+
+func (StartUncovered) isEffect()  {}
+func (CancelUncovered) isEffect() {}
 
 // Effect is something the caller must do after Update.
 type Effect interface{ isEffect() }
@@ -178,7 +205,8 @@ type Model struct {
 	HelpTop      int    // first help line shown (the help scrolls)
 	UnkFrom      Screen // the screen `u` was pressed on
 	UnkTop       int    // first uncovered folder shown
-	W, H         int    // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
+	UnkState     UnkState
+	W, H         int // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
 }
 
 // NewModel is the model before the scan starts.

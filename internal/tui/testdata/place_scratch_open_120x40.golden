@@ -3,6 +3,7 @@
 | to remove: 0 B, 0 of 6 selected | excluded: 2                                                                        |
 | agents installed: 2 | schedule: every 30m, next 14:30                                                                |
 | disk free: 37.3 GB -> 37.3 GB                                                                                        |
+| not covered by any rule: searching...                                                                                |
 +----------------------------------------------------------------------------------------------------------------------+
           size path                                                                    age   updatedAt  source          
   auto = removable now | optional = you pick it | kept = protected
@@ -14,7 +15,6 @@
  [-]         ? /private/tmp/claude-502/-Users-x-proj3/s3                               -     2026-11-13 kept-active     
  [-]         ? /private/tmp/claude-502/-Users-x-proj4/s4                               -     2026-11-14 kept-active     
  [-]         ? /private/tmp/claude-502/-Users-x-proj5/s5                               -     2026-11-15 kept-active     
-
 
 
 

@@ -5,6 +5,7 @@
 | disk free: 37.3 GB -> 37.3 GB                                                |
 | optional (off): 1 | 762.9 MB | o                                             |
 | kept: 1 | g                                                                  |
+| not covered by any rule: searching...                                        |
 +------------------------------------------------------------------------------+
           size path                            age   updatedAt  source          
   auto = removable now | optional = you pick it | kept = protected
@@ -15,7 +16,6 @@
  [ ]   57.2 MB /home/user/containers/stopped   54d   2026-10-02 optional-on     
  [ ]   19.1 MB /home/user/a/v...he/list/target -     -          auto            
  [ ]    9.5 MB /home/user/zz                   -     2026-11-10 auto            
-
 
 
 

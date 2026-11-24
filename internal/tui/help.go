@@ -23,10 +23,14 @@ var helpText = []string{
 	"Keys",
 	"  enter  open a place, or show the details of a row",
 	"  space  select a row; on a place: select its ready rows",
-	"  a      select every ready row in view",
+	"  a      places: select the ready rows of the places in view",
+	"         inside a place: its ready rows; flat list: every row in view",
+	"         (optional ones too once o shows them)",
+	"  o      flat list: show or hide optional rows (places always list them)",
 	"  g      show or hide protected (kept) rows",
 	"  c      switch between the places and the flat list",
-	"  x      exclude a row from every future run (open a place first)",
+	"  x      exclude the row under the cursor (flat list, inside a place)",
+	"         from every future run; on the places, open a place first",
 	"  d      delete what is selected, after a confirmation",
 	"  u      folders that no rule covers (read-only)",
 	"  / search   s sort   esc back   q quit",
@@ -43,9 +47,9 @@ func viewHelp(m Model, w, h int) []string {
 	room := helpRoom(h)
 	top := min(max(m.HelpTop, 0), max(len(helpText)-room, 0))
 	end := min(top+room, len(helpText))
-	footer := "esc or ? closes"
+	footer := "esc or ? close | q quit"
 	if len(helpText) > room {
-		footer = fmt.Sprintf("lines %d-%d of %d  up/down: scroll  esc or ? closes", top+1, end, len(helpText))
+		footer = fmt.Sprintf("lines %d-%d of %d | up/down scroll | esc or ? close | q quit", top+1, end, len(helpText))
 	}
 	return withFooter(helpText[top:end], footer, w, h)
 }
@@ -56,6 +60,8 @@ func helpKey(m Model, k KeyMsg) (Model, []Effect) {
 	switch {
 	case k.Special == KeyEsc || k.Rune == '?':
 		m.Screen, m.HelpTop = m.HelpFrom, 0
+	case k.Rune == 'q':
+		return m, []Effect{Quit{}}
 	case k.Special == KeyUp || k.Rune == 'k':
 		m.HelpTop = max(m.HelpTop-1, 0)
 	case k.Special == KeyDown || k.Rune == 'j':
@@ -79,10 +85,17 @@ const uncoveredNote = "no rule covers these; sapulidi never removes what it does
 
 // openUnknown shows the uncovered folders, or says there are none.
 func openUnknown(m Model) Model {
-	if len(m.Summary.Unknown) == 0 {
+	switch {
+	case m.UnkState == UnkSearching:
+		m.Status = "not searched yet: still searching"
+		return m
+	case m.UnkState == UnkCancelled:
+		m.Status = "search cancelled: nothing was searched"
+		return m
+	case len(m.Summary.Unknown) == 0:
 		m.Status = "no big folder is left uncovered"
 		if m.Summary.UnknownPartial {
-			m.Status = "no uncovered folder found yet (the search was partial)"
+			m.Status = "none found, but the search was partial"
 		}
 		return m
 	}
@@ -105,7 +118,7 @@ func unknownKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Special == KeyDown || k.Rune == 'j':
 		m.UnkTop = min(m.UnkTop+1, last)
 	case k.Rune == ' ' || k.Rune == 'x' || k.Rune == 'd' || k.Rune == 'a':
-		m.Status = "read-only: " + uncoveredNote
+		m.Status = "read-only: nothing here can be removed"
 	}
 	return m, nil
 }
@@ -114,20 +127,16 @@ func unknownKey(m Model, k KeyMsg) (Model, []Effect) {
 func unknownRoom(h int) int { return max(h-5, 1) }
 
 func viewUnknown(m Model, w, h int) []string {
-	var total int64
-	for _, u := range m.Summary.Unknown {
-		total += u.Bytes
-	}
-	title := fmt.Sprintf("Not covered by any rule: %s, %s", plural(len(m.Summary.Unknown), "folder"), fmtBytes(total))
+	title := fmt.Sprintf("Not covered by any rule: %s, %s", plural(len(m.Summary.Unknown), "folder"), unknownTotal(m))
 	if m.Summary.UnknownPartial {
-		title += " (partial: the search did not finish)"
+		title += " (partial)"
 	}
 	lines := []string{title, uncoveredNote, ""}
 	room := unknownRoom(h)
 	top := min(max(m.UnkTop, 0), max(len(m.Summary.Unknown)-room, 0))
 	for i := top; i < len(m.Summary.Unknown) && i < top+room; i++ {
 		u := m.Summary.Unknown[i]
-		lines = append(lines, "  "+fitRight(fmtBytes(u.Bytes), 9)+"  "+shorten(clean(strings.TrimRight(showHome(u.Path, m.Summary.Home), "/")), w-13))
+		lines = append(lines, "  "+fitRight(sizeCell(1, u.Bytes, m.Summary.UnknownPartial), 9)+"  "+shorten(clean(strings.TrimRight(showHome(u.Path, m.Summary.Home), "/")), w-13))
 	}
 	for len(lines) < h-2 {
 		lines = append(lines, "")

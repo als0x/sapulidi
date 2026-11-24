@@ -3,6 +3,7 @@
 | to remove: 0 B, 0 of 6 selected | excluded: 2                                |
 | agents installed: 2 | schedule: every 30m, next 14:30                        |
 | disk free: 37.3 GB -> 37.3 GB                                                |
+| not covered by any rule: searching...                                        |
 +------------------------------------------------------------------------------+
          ready  optional place                                  kept updatedAt 
   ready = removable now | optional = you pick it | kept = protected
@@ -13,7 +14,6 @@
  [-]         -         - commands | docker                         - -         
  [-]         -         - ~/ex/                                     - -         
  [-]         -         - ~/keptonly/                               1 2026-11-20
-
 
 
 

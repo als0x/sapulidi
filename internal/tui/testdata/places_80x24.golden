@@ -4,6 +4,7 @@
 | agents installed: 2 | schedule: every 30m, next 14:30                        |
 | disk free: 37.3 GB -> 37.3 GB                                                |
 | kept: 3 | g                                                                  |
+| not covered by any rule: searching...                                        |
 +------------------------------------------------------------------------------+
          ready  optional place                                  kept updatedAt 
   ready = removable now | optional = you pick it | kept = protected
@@ -12,7 +13,6 @@
  [ ]         -  762.9 MB ~/old/                                    - 2025-02-03
  [-]         -         - commands | docker                         - -         
  [-]         -         - ~/ex/                                     - -         
-
 
 
 

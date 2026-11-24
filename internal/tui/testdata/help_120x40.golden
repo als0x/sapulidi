@@ -14,10 +14,14 @@ Markers
 Keys
   enter  open a place, or show the details of a row
   space  select a row; on a place: select its ready rows
-  a      select every ready row in view
+  a      places: select the ready rows of the places in view
+         inside a place: its ready rows; flat list: every row in view
+         (optional ones too once o shows them)
+  o      flat list: show or hide optional rows (places always list them)
   g      show or hide protected (kept) rows
   c      switch between the places and the flat list
-  x      exclude a row from every future run (open a place first)
+  x      exclude the row under the cursor (flat list, inside a place)
+         from every future run; on the places, open a place first
   d      delete what is selected, after a confirmation
   u      folders that no rule covers (read-only)
   / search   s sort   esc back   q quit
@@ -33,8 +37,4 @@ Kept rows are never removable from here.
 
 
 
-
-
-
-
-esc or ? closes
+esc or ? close | q quit

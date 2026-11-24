@@ -45,8 +45,21 @@ type EngineDeps struct {
 	roots   []string
 	bases   []string
 
-	unknown        []Uncovered
-	unknownPartial bool
+	planEnv core.Env // the environment of the last scan and its plan: what the uncovered search needs
+	plan    engine.Summary
+}
+
+// Uncovered implements UncoveredDeps: the search `report` runs for folders no rule covers, over the plan of the last
+// scan. It ends with ctx (esc, quit) and says partial then, or when its own 30 s budget ran out.
+func (e *EngineDeps) Uncovered(ctx context.Context) ([]Uncovered, bool) {
+	env := e.planEnv
+	env.Ctx = ctx
+	dirs, partial := report.ScanUncovered(&env, e.plan)
+	out := make([]Uncovered, 0, len(dirs))
+	for _, d := range dirs {
+		out = append(out, Uncovered{Path: d.Path, Bytes: d.Bytes})
+	}
+	return out, partial
 }
 
 // withResolved adds the symlink-resolved spelling of each base (/tmp and /private/tmp on macOS) when it differs;
@@ -108,19 +121,13 @@ func (e *EngineDeps) Scan(ctx context.Context, progress func(category string, do
 		e.roots = append(e.roots, r.Path)
 	}
 	e.bases = withResolved(cleanBases(append(slices.Clone(env.Platform.ScratchBases()), env.TempDir)))
-	e.unknown, e.unknownPartial = nil, false
-	dirs, partial := report.ScanUncovered(&cp, sum) // the same search `report` runs; ends with ctx (esc)
-	for _, d := range dirs {
-		e.unknown = append(e.unknown, Uncovered{Path: d.Path, Bytes: d.Bytes})
-	}
-	e.unknownPartial = partial
+	e.planEnv, e.plan = cp, sum // kept for the second phase, Uncovered
 	return rowsOf(sum), nil
 }
 
 // Summary implements Deps.
 func (e *EngineDeps) Summary() SummaryData {
-	s := SummaryData{Now: e.now, FreeNow: e.freeNow, Roots: slices.Clone(e.roots), Bases: slices.Clone(e.bases),
-		Unknown: slices.Clone(e.unknown), UnknownPartial: e.unknownPartial}
+	s := SummaryData{Now: e.now, FreeNow: e.freeNow, Roots: slices.Clone(e.roots), Bases: slices.Clone(e.bases)}
 	s.Home, _ = os.UserHomeDir()
 	if e.now.IsZero() {
 		s.Now = time.Now()

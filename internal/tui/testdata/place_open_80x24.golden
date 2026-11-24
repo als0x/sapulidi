@@ -4,12 +4,12 @@
 | agents installed: 2 | schedule: every 30m, next 14:30                        |
 | disk free: 37.3 GB -> 37.3 GB                                                |
 | kept: 3 | g                                                                  |
+| not covered by any rule: searching...                                        |
 +------------------------------------------------------------------------------+
           size path                            age   updatedAt  source          
   auto = removable now | optional = you pick it | kept = protected
 >[ ]    1.1 GB /home/user/proj/node_modules    8mo   2026-11-01 optional-on     
  [-]  667.6 MB /home/user/proj/target          -     2026-09-09 excluded        
-
 
 
 

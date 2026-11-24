@@ -4,12 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/testutil"
+	"github.com/als0x/sapulidi/internal/tui/term"
 )
 
 const gib = int64(1) << 30
@@ -26,8 +28,10 @@ func realMachineRows() []Row {
 	return rows
 }
 
+// modelOf is a model after the scan AND its second phase: the uncovered folders of s have arrived.
 func modelOf(rows []Row, s SummaryData) Model {
 	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: s})
+	m, _ = Update(m, UncoveredMsg{Unknown: s.Unknown, Partial: s.UnknownPartial})
 	return m
 }
 
@@ -172,7 +176,7 @@ func TestUncoveredSummaryLineAndList(t *testing.T) {
 func TestUncoveredPartialAndNone(t *testing.T) {
 	s := unknownSummary()
 	s.UnknownPartial = true
-	if got := screen(modelOf(placesRows(), s)); !strings.Contains(got, "26.0 GB partial  (u)") {
+	if got := screen(modelOf(placesRows(), s)); !strings.Contains(got, "26.0 GB+ partial  (u)") {
 		t.Errorf("partial missing:\n%s", got)
 	}
 	none := modelOf(placesRows(), placesSummary())
@@ -216,7 +220,7 @@ func TestFooterIsOneLinePerScreen(t *testing.T) {
 	}
 }
 
-func TestScanFindsUncoveredFoldersAndSaysPartialWhenCancelled(t *testing.T) {
+func TestEngineDepsUncoveredIsASeparatePhaseAndPartialWhenCancelled(t *testing.T) {
 	home := testutil.TempHome(t)
 	t.Setenv("HF_HOME", "")
 	root := filepath.Join(home, "work", "repo")
@@ -230,18 +234,309 @@ func TestScanFindsUncoveredFoldersAndSaysPartialWhenCancelled(t *testing.T) {
 				Settings: &testutil.FakeSettings{}}, nil
 		},
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := d.Scan(ctx, func(string, int, int) {}); err != nil {
-		t.Fatal(err)
-	}
-	if s := d.Summary(); !s.UnknownPartial {
-		t.Errorf("a cancelled scan must say partial: %+v", s)
-	}
 	if _, err := d.Scan(context.Background(), func(string, int, int) {}); err != nil {
 		t.Fatal(err)
 	}
-	if s := d.Summary(); s.UnknownPartial || len(s.Unknown) != 0 {
-		t.Errorf("small fixture has nothing uncovered and finishes: %+v", s)
+	if s := d.Summary(); len(s.Unknown) != 0 || s.UnknownPartial {
+		t.Errorf("the scan itself must not search for uncovered folders: %+v", s)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, partial := d.Uncovered(ctx); !partial {
+		t.Error("a cancelled search must say partial")
+	}
+	if dirs, partial := d.Uncovered(context.Background()); partial || len(dirs) != 0 {
+		t.Errorf("small fixture has nothing uncovered and finishes: %v %v", dirs, partial)
+	}
+}
+
+// slowUncovered is a Deps whose second phase blocks until it is released or cancelled.
+type slowUncovered struct {
+	*fakeDeps
+	release  chan struct{}
+	ctxEnded chan struct{}
+}
+
+func (d *slowUncovered) Uncovered(ctx context.Context) ([]Uncovered, bool) {
+	select {
+	case <-ctx.Done():
+		close(d.ctxEnded)
+		return nil, true
+	case <-d.release:
+		return []Uncovered{{"/home/user/big", 5 * gib}}, false
+	}
+}
+
+func slowRun(t *testing.T) (*fakeTerm, *slowUncovered, chan error) {
+	ft, d := newFakes()
+	s := &slowUncovered{fakeDeps: d, release: make(chan struct{}), ctxEnded: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() { done <- Run(context.Background(), s) }()
+	return ft, s, done
+}
+
+func TestPlacesAreUsableWhileTheUncoveredSearchRuns(t *testing.T) {
+	ft, d, done := slowRun(t)
+	ft.waitFor(t, "searching") // the places are on screen and the summary says the search is running
+	ft.waitFor(t, "enter to look inside")
+	ft.keys(" ")
+	ft.waitFor(t, "[x]")
+	ft.keys("u")
+	ft.waitFor(t, "not searched yet")
+	ft.special(term.KeyEsc) // cancels the search, not the plan
+	ft.waitFor(t, "search cancelled")
+	select {
+	case <-d.ctxEnded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("esc did not cancel the uncovered search")
+	}
+	if !strings.Contains(ft.screen(), "/cache") && !strings.Contains(ft.screen(), "cache") {
+		t.Errorf("the places must stay:\n%s", ft.screen())
+	}
+	ft.keys("q")
+	if err := finish(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQuitDuringTheUncoveredSearchCancelsIt(t *testing.T) {
+	ft, d, done := slowRun(t)
+	ft.waitFor(t, "searching")
+	ft.keys("q")
+	if err := finish(t, done); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-d.ctxEnded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("quitting did not cancel the uncovered search")
+	}
+}
+
+func TestUncoveredResultArrivesAfterTheScreenShowedThePlaces(t *testing.T) {
+	ft, d, done := slowRun(t)
+	ft.waitFor(t, "searching")
+	close(d.release)
+	ft.waitFor(t, "not covered by any rule: 1 folder")
+	ft.keys("q")
+	if err := finish(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLateUncoveredMessageChangesNothingOnScreen(t *testing.T) {
+	late := UncoveredMsg{Unknown: []Uncovered{{"/x", gib}}}
+	// after a cancel the message is dropped whole
+	m, _ := keys(placesModel(), "<esc>")
+	if m.UnkState != UnkCancelled {
+		t.Fatalf("esc did not cancel: %v", m.UnkState)
+	}
+	if n, _ := Update(m, late); !reflect.DeepEqual(n, m) {
+		t.Error("a message after a cancel changed the model")
+	}
+	// after the user left the places it only fills in the summary: screen, cursor, status and selection stay
+	in, _ := keys(placesModel(), "j<enter>")
+	n, _ := Update(in, late)
+	if n.Screen != in.Screen || n.Cursor != in.Cursor || n.Place != in.Place || n.Status != in.Status || !reflect.DeepEqual(n.Selected, in.Selected) {
+		t.Errorf("late message moved the screen: %v/%d -> %v/%d", in.Screen, in.Cursor, n.Screen, n.Cursor)
+	}
+	if len(n.Summary.Unknown) != 1 || n.UnkState != UnkDone {
+		t.Errorf("late message was not taken: %+v %v", n.Summary.Unknown, n.UnkState)
+	}
+	// a second message changes nothing
+	if again, _ := Update(n, UncoveredMsg{Unknown: []Uncovered{{"/y", 1}}}); !reflect.DeepEqual(again, n) {
+		t.Error("a second message changed the finished model")
+	}
+}
+
+func TestScanDoneAsksForTheSecondPhase(t *testing.T) {
+	m, eff := Update(NewModel(true), ScanDoneMsg{Rows: placesRows(), Summary: placesSummary()})
+	if m.Screen != ScreenPlaces || m.UnkState != UnkSearching {
+		t.Fatalf("screen %v state %v", m.Screen, m.UnkState)
+	}
+	if len(eff) != 1 {
+		t.Fatalf("effects %v", eff)
+	}
+	if _, ok := eff[0].(StartUncovered); !ok {
+		t.Fatalf("effect %T", eff[0])
+	}
+	if !strings.Contains(screen(m), "not covered by any rule: searching...") {
+		t.Errorf("summary does not say it is searching:\n%s", screen(m))
+	}
+	if _, eff := keys(m, "<esc>"); len(eff) != 1 {
+		t.Errorf("esc must cancel the search: %v", eff)
+	} else if _, ok := eff[0].(CancelUncovered); !ok {
+		t.Errorf("effect %T", eff[0])
+	}
+}
+
+func TestUBeforeTheSearchEndsOrAfterACancelDoesNotClaimNoneFound(t *testing.T) {
+	searching := placesModel()
+	n, _ := keys(searching, "u")
+	if n.Screen != ScreenPlaces || !strings.Contains(n.Status, "not searched yet") || strings.Contains(n.Status, "no big folder") {
+		t.Errorf("searching: screen %v status %q", n.Screen, n.Status)
+	}
+	cancelled, _ := keys(searching, "<esc>")
+	n, _ = keys(cancelled, "u")
+	if !strings.Contains(n.Status, "search cancelled") || strings.Contains(n.Status, "no big folder") {
+		t.Errorf("cancelled: status %q", n.Status)
+	}
+	if got := screen(cancelled); !strings.Contains(got, "not covered by any rule: search cancelled") {
+		t.Errorf("cancelled summary:\n%s", got)
+	}
+	none, _ := keys(modelOf(placesRows(), placesSummary()), "u")
+	if !strings.Contains(none.Status, "no big folder is left uncovered") {
+		t.Errorf("none found: status %q", none.Status)
+	}
+}
+
+func TestUncoveredListChangesNothingButLeaving(t *testing.T) {
+	m, _ := keys(modelOf(placesRows(), unknownSummary()), "<down>u")
+	for _, k := range []string{"<enter>", "y", "n", "c", "g", "o", "s", "/", " ", "x", "d", "a", "<bs>"} {
+		n, eff := keys(m, k)
+		n.Status = m.Status
+		if len(eff) != 0 || !reflect.DeepEqual(n, m) {
+			t.Errorf("%q on the uncovered list changed the model or asked for %v", k, eff)
+		}
+	}
+}
+
+func TestPartialSearchSizesAreLowerBounds(t *testing.T) {
+	s := unknownSummary()
+	s.UnknownPartial = true
+	m, _ := keys(modelOf(placesRows(), s), "u")
+	got := strings.Join(View(m, 80, 24), "\n")
+	for _, want := range []string{"Not covered by any rule: 3 folders, 26.0 GB+ (partial)", "21.0 GB+", "4.0 GB+", "1.0 GB+"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q missing:\n%s", want, got)
+		}
+	}
+	done, _ := keys(modelOf(placesRows(), unknownSummary()), "u")
+	if got := strings.Join(View(done, 80, 24), "\n"); strings.Contains(got, "+") && strings.Contains(got, "GB+") {
+		t.Errorf("a finished search has exact sizes:\n%s", got)
+	}
+}
+
+func TestUncoveredScreenIsNotCutAt80Columns(t *testing.T) {
+	s := placesSummary()
+	for i := 0; i < 20; i++ {
+		s.Unknown = append(s.Unknown, Uncovered{Path: "/home/user/.cache/folder-" + string(rune('a'+i)), Bytes: int64(20-i) * gib})
+	}
+	s.UnknownPartial = true
+	m, _ := keys(modelOf(placesRows(), s), "u")
+	m, _ = keys(m, " ")
+	lines := View(m, 80, 24)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{"(partial)", uncoveredNote, "read-only: nothing here can be removed", "up/down scroll | esc back | ? help | q quit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q cut or missing:\n%s", want, got)
+		}
+	}
+	if len(lines) > 24 {
+		t.Errorf("%d lines", len(lines))
+	}
+	for _, l := range lines {
+		if width(l) > 80 {
+			t.Errorf("line too wide: %q", l)
+		}
+	}
+}
+
+func TestHelpAndUncoveredFootersAdvertiseOnlyWhatWorks(t *testing.T) {
+	m := modelOf(placesRows(), unknownSummary())
+	for name, start := range map[string]Model{"help": mustKeys(m, "?"), "uncovered": mustKeys(m, "u")} {
+		for _, k := range []string{"<esc>", "?", "q"} {
+			if k == "?" && name == "uncovered" {
+				if n, _ := keys(start, k); n.Screen != ScreenHelp {
+					t.Errorf("uncovered: ? must open help")
+				}
+				continue
+			}
+			n, eff := keys(start, k)
+			if k == "q" {
+				if len(eff) != 1 {
+					t.Errorf("%s: q must quit", name)
+				} else if _, ok := eff[0].(Quit); !ok {
+					t.Errorf("%s: q gave %T", name, eff[0])
+				}
+				continue
+			}
+			if n.Screen == start.Screen {
+				t.Errorf("%s: %s must leave the screen", name, k)
+			}
+		}
+	}
+	for _, want := range []string{"esc or ? close", "q quit"} {
+		if f := footerOf(mustKeys(m, "?")); !strings.Contains(f, want) {
+			t.Errorf("help footer %q lacks %q", f, want)
+		}
+	}
+}
+
+func mustKeys(m Model, s string) Model { n, _ := keys(m, s); return n }
+
+func helpText80(t *testing.T) string {
+	t.Helper()
+	return strings.Join(helpText, "\n")
+}
+
+func TestHelpClaimsMatchTheKeys(t *testing.T) {
+	help := helpText80(t)
+	for _, line := range helpText {
+		if width(line) > 76 {
+			t.Errorf("help line too wide: %q", line)
+		}
+	}
+	// a: on the places only the ready rows of the places in view
+	const optOff = "/home/user/old/node_modules"
+	places := mustKeys(placesModel(), "a")
+	if places.Selected[optOff] || len(places.Selected) == 0 {
+		t.Errorf("places a: %v", places.Selected)
+	}
+	// a: inside a place the ready rows only
+	inOld := mustKeys(placesModel(), "jj<enter>a")
+	if inOld.Place != "~/old/" || inOld.Selected[optOff] {
+		t.Errorf("place a selected an optional row: %v in %q", inOld.Selected, inOld.Place)
+	}
+	// a: in the flat list every selectable row in view, optional ones once o shows them
+	list := mustKeys(flat(placesModel()), "a")
+	if list.Selected[optOff] {
+		t.Error("flat a selected a row o has not shown")
+	}
+	list = mustKeys(flat(placesModel()), "oa")
+	if !list.Selected[optOff] {
+		t.Error("flat a after o must select the optional row")
+	}
+	// o: the flat list toggles, the places say they always list them
+	if !mustKeys(flat(placesModel()), "o").ShowOptional {
+		t.Error("o must show optional rows in the flat list")
+	}
+	if got := mustKeys(placesModel(), "o"); got.ShowOptional || !strings.Contains(got.Status, "always listed") {
+		t.Errorf("o on the places: %v %q", got.ShowOptional, got.Status)
+	}
+	// x: excludes the row under the cursor in the flat list and in a place; the places say to open one
+	for name, m := range map[string]Model{"flat": flat(placesModel()), "place": mustKeys(placesModel(), "<enter>")} {
+		if _, eff := keys(m, "x"); len(eff) != 1 {
+			t.Errorf("%s: x must exclude the row under the cursor: %v", name, eff)
+		} else if _, ok := eff[0].(AddExclusion); !ok {
+			t.Errorf("%s: x gave %T", name, eff[0])
+		}
+	}
+	if got := mustKeys(placesModel(), "x"); !strings.Contains(got.Status, "open the place") {
+		t.Errorf("x on the places: %q", got.Status)
+	}
+	for _, claim := range []string{
+		"places: select the ready rows of the places in view",
+		"inside a place: its ready rows; flat list: every row in view",
+		"(optional ones too once o shows them)",
+		"flat list: show or hide optional rows (places always list them)",
+		"exclude the row under the cursor (flat list, inside a place)",
+		"on the places, open a place first",
+		"u      folders that no rule covers",
+		"q quit",
+	} {
+		if !strings.Contains(help, claim) {
+			t.Errorf("help lacks %q", claim)
+		}
 	}
 }

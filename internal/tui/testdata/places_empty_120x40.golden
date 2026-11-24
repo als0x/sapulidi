@@ -4,12 +4,12 @@
 | agents installed: 2 | schedule: every 30m, next 14:30                                                                |
 | disk free: 37.3 GB -> 37.3 GB                                                                                        |
 | kept: 1 | g                                                                                                          |
+| not covered by any rule: searching...                                                                                |
 +----------------------------------------------------------------------------------------------------------------------+
          ready  optional place                                                                          kept updatedAt 
   ready = removable now | optional = you pick it | kept = protected
   nothing is ready to delete
   kept: 1 | g
-
 
 
 

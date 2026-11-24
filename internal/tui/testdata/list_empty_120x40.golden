@@ -5,13 +5,13 @@
 | disk free: 37.3 GB -> 37.3 GB                                                                                        |
 | optional (off): 1 | 762.9 MB | o                                                                                     |
 | kept: 1 | g                                                                                                          |
+| not covered by any rule: searching...                                                                                |
 +----------------------------------------------------------------------------------------------------------------------+
           size path                                                                    age   updatedAt  source          
   auto = removable now | optional = you pick it | kept = protected
   nothing is ready to delete
   optional (off): 1 | 762.9 MB | o
   kept: 1 | g
-
 
 
 

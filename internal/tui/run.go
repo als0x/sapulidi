@@ -48,6 +48,13 @@ type Deps interface {
 	RemoveExclusion(path string) error
 }
 
+// UncoveredDeps is the optional second phase of the scan: Deps that also implement it get the big folders no rule
+// covers searched after the places are shown. It returns early (partial) when ctx is done. Deps without it report
+// an empty, finished search.
+type UncoveredDeps interface {
+	Uncovered(ctx context.Context) (dirs []Uncovered, partial bool)
+}
+
 // runUpdate is Update; a test replaces it to inject a panic.
 var runUpdate = Update
 
@@ -153,6 +160,7 @@ type loop struct {
 
 	mu         sync.Mutex // guards the fields below; the signal hook runs on another goroutine
 	scanCancel context.CancelFunc
+	uncCancel  context.CancelFunc
 	delCancel  context.CancelFunc
 	delDone    chan struct{} // closed when the running deletion has returned; nil when none ran
 }
@@ -197,10 +205,13 @@ func (l *loop) showFinishing() {
 // finish stops the work in flight; a running deletion is waited for (a while) so that no removal is cut off.
 func (l *loop) finish() {
 	l.mu.Lock()
-	scan, del := l.scanCancel, l.delCancel
+	scan, unc, del := l.scanCancel, l.uncCancel, l.delCancel
 	l.mu.Unlock()
 	if scan != nil {
 		scan()
+	}
+	if unc != nil {
+		unc()
 	}
 	if del != nil {
 		del()
@@ -252,6 +263,15 @@ func (l *loop) execute(effects []Effect) {
 		case CancelScan:
 			l.mu.Lock()
 			cancel := l.scanCancel
+			l.mu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+		case StartUncovered:
+			l.startUncovered()
+		case CancelUncovered:
+			l.mu.Lock()
+			cancel := l.uncCancel
 			l.mu.Unlock()
 			if cancel != nil {
 				cancel()
@@ -324,6 +344,33 @@ func (l *loop) startScan() {
 		if err != nil {
 			l.say("scan failed: " + err.Error())
 		}
+	}()
+}
+
+// startUncovered runs the second phase in its own goroutine with its own cancel; its only output is one message.
+func (l *loop) startUncovered() {
+	ctx, cancel := context.WithCancel(l.ctx)
+	l.mu.Lock()
+	prev := l.uncCancel
+	l.uncCancel = cancel
+	l.mu.Unlock()
+	if prev != nil {
+		prev()
+	}
+	go func() {
+		msg := UncoveredMsg{}
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					msg = UncoveredMsg{Partial: true}
+				}
+			}()
+			if u, ok := l.d.(UncoveredDeps); ok {
+				msg.Unknown, msg.Partial = u.Uncovered(ctx)
+				msg.Partial = msg.Partial || ctx.Err() != nil
+			}
+		}()
+		l.send(msg)
 	}()
 }
 

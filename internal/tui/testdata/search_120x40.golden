@@ -5,12 +5,12 @@
 | disk free: 37.3 GB -> 37.3 GB                                                                                        |
 | optional (off): 1 | 762.9 MB | o                                                                                     |
 | kept: 1 | g                                                                                                          |
+| not covered by any rule: searching...                                                                                |
 +----------------------------------------------------------------------------------------------------------------------+
           size path                                                                    age   updatedAt  source          
   auto = removable now | optional = you pick it | kept = protected
 >[ ]    1.1 GB /home/user/proj/node_modules                                            8mo   2026-06-30 optional-on     
  [-]  476.8 MB /home/user/.npm/_cacache                                                15mo  2026-11-20 auto            
-
 
 
 

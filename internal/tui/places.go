@@ -250,6 +250,11 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Special == KeyEsc:
 		m.Filter = ""
 		m.Cursor = firstPlace(m)
+		if m.UnkState == UnkSearching { // esc also stops the second phase
+			m.UnkState = UnkCancelled
+			m.Status = "search for uncovered folders cancelled"
+			return m, []Effect{CancelUncovered{}}
+		}
 	case k.Rune == 'q':
 		return m, []Effect{Quit{}}
 	case k.Rune == '/':
