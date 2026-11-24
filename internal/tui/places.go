@@ -302,6 +302,24 @@ func (m Model) optionalPaths(name string) (paths []string, all bool) {
 	return paths, all
 }
 
+// unselectedOptional counts the optional rows of a place that are not selected, with their size.
+func (m Model) unselectedOptional(name string) (n int, bytes int64, unknown bool) {
+	paths, _ := m.optionalPaths(name)
+	byPath := map[string]Row{}
+	for _, r := range m.Rows {
+		if r.Place == name {
+			byPath[r.Path] = r
+		}
+	}
+	for _, p := range paths {
+		if !m.Selected[p] {
+			n++
+			addBytes(&bytes, &unknown, byPath[p].Bytes)
+		}
+	}
+	return n, bytes, unknown
+}
+
 // spacePlace is `space` on a place. Ready rows are toggled directly; a place with only optional rows asks first,
 // so an optional row is never selected without the user seeing the question.
 func spacePlace(m Model, cur place) Model {
@@ -319,10 +337,11 @@ func spacePlace(m Model, cur place) Model {
 	}
 	m = selectReadyIn(m, []place{cur})
 	if cur.ReadyN > 0 && m.Status == "" && m.placeReadySelected(cur.Name) {
+		n, b, u := m.unselectedOptional(cur.Name)
 		switch {
-		case cur.OptN > 0:
-			m.Status = fmt.Sprintf("%s selected; %s (%s) stay unselected: enter to pick, or space again after clearing to add them",
-				plural(cur.ReadyN, "ready row"), plural(cur.OptN, "optional row"), sizeCell(1, cur.OptBytes, cur.OptUnknwn))
+		case n > 0:
+			m.Status = fmt.Sprintf("%s selected; %s (%s) stay unselected: enter to pick them",
+				plural(cur.ReadyN, "ready row"), plural(n, "optional row"), sizeCell(1, b, u))
 		case cur.ReadyN > 1:
 			m.Status = fmt.Sprintf("selected %d ready rows in %s (enter to see them)", cur.ReadyN, cur.Name)
 		}
@@ -332,6 +351,10 @@ func spacePlace(m Model, cur place) Model {
 
 // promptKey handles the optional-rows question: only y, n and esc do anything.
 func promptKey(m Model, k KeyMsg) (Model, []Effect) {
+	if m.small() { // the prompt is not on screen: no key acts
+		m.PlacePrompt = ""
+		return m, nil
+	}
 	if k.Rune != 'y' && k.Rune != 'n' && k.Special != KeyEsc {
 		return m, nil
 	}

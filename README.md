@@ -52,7 +52,7 @@ after the places are shown: the summary says `searching` until it ends, `esc` on
 that timed out or was cut short shows `partial` with sizes ending in `+`; nothing there can be selected or deleted).
 The summary box also shows the amount to remove, the excluded count, the schedule and the free disk space. One line at
 the bottom lists the keys that work on the current screen. Keys: `up`/`down` move, `enter` open a place or a row's detail, `space` select (on a place: every
-ready row in it, never the optional ones; a place with only optional rows asks `y`/`n` first. The box of a place is `[x]` only when every row you can select in it is selected, and `[-]` when none can be), `a` select all (on the places and inside a place: ready rows only, never the optional ones; in the flat list: every row in
+ready row in it, never the optional ones; a place with only optional rows asks `y`/`n` first; in a place with both, `space` takes the ready rows only, so its box stays `[~]` and never reaches `[x]`: open it with `enter` and pick the optional rows there. The box of a place is `[x]` only when every row you can select in it is selected, and `[-]` when none can be), `a` select all (on the places and inside a place: ready rows only, never the optional ones; in the flat list: every row in
 view), `d` delete the selection (its confirmation scrolls with `up`/`down`, `j`/`k`, `PgUp`/`PgDn`), `x` exclude, `c` switch between the places and the flat list, `o` show optional rows in the flat list
 (places always list them), `g` show what a guard keeps (guarded, with the reason; on the places it also lists
 places that hold only kept rows), `/` search, `s` sort, `esc` back, `q` quit. The selection belongs to the whole

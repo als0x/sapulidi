@@ -123,6 +123,45 @@ func TestSpaceOnOptionalOnlyPlaceAsks(t *testing.T) {
 	}
 }
 
+func TestPromptClosesWhenTheWindowGetsSmall(t *testing.T) {
+	m := onPlace(t, placesModel(), pOld)
+	m, _ = keys(m, " ")
+	if m.PlacePrompt == "" {
+		t.Fatal("prompt did not open")
+	}
+	m, _ = Update(m, ResizeMsg{70, 20})
+	if m.PlacePrompt != "" {
+		t.Fatalf("prompt still open: %q", m.PlacePrompt)
+	}
+	m, _ = keys(m, "y")
+	if len(m.Selected) != 0 {
+		t.Fatalf("y selected unseen: %v", m.Selected)
+	}
+	// a prompt that is somehow open on a small window never acts either
+	m.PlacePrompt = pOld
+	m, _ = keys(m, "y")
+	if len(m.Selected) != 0 || m.PlacePrompt != "" {
+		t.Fatalf("small y: %v %q", m.Selected, m.PlacePrompt)
+	}
+}
+
+func TestPromptClosesOnRescanAndExclusion(t *testing.T) {
+	m := onPlace(t, placesModel(), pOld)
+	m, _ = keys(m, " ")
+	n, _ := Update(m, ScanDoneMsg{Rows: placesRows()[:3], Summary: placesSummary()})
+	if n.PlacePrompt != "" || len(n.Selected) != 0 {
+		t.Fatalf("rescan: %q %v", n.PlacePrompt, n.Selected)
+	}
+	n, _ = keys(n, "y")
+	if len(n.Selected) != 0 {
+		t.Fatalf("y after rescan: %v", n.Selected)
+	}
+	e, _ := Update(m, ExclusionChangedMsg{Path: "/home/user/old/node_modules", Excluded: true})
+	if e.PlacePrompt != "" {
+		t.Fatalf("exclusion: %q", e.PlacePrompt)
+	}
+}
+
 func TestPromptSizeWithUnknownPartUsesPlus(t *testing.T) {
 	rows := []Row{
 		{Path: "/home/user/old/a", Bytes: 800_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/nm@1"},
@@ -141,9 +180,16 @@ func TestSpaceOnMixedPlaceSelectsReadyOnlyAndSaysSo(t *testing.T) {
 	if !reflect.DeepEqual(m.Selected, map[string]bool{"/home/user/mix/a": true}) || m.PlacePrompt != "" {
 		t.Fatalf("selected %v prompt %q", m.Selected, m.PlacePrompt)
 	}
-	want := "1 ready row selected; 1 optional row (286.1 MB) stay unselected: enter to pick, or space again after clearing to add them"
+	want := "1 ready row selected; 1 optional row (286.1 MB) stay unselected: enter to pick them"
 	if m.Status != want {
 		t.Fatalf("status %q", m.Status)
+	}
+	// with the optional row already selected, nothing is said about optional rows
+	m2 := onPlace(t, mixedModel(), pMix)
+	m2.Selected = map[string]bool{"/home/user/mix/b": true}
+	m2, _ = keys(m2, " ")
+	if strings.Contains(m2.Status, "optional") {
+		t.Fatalf("status %q", m2.Status)
 	}
 }
 

@@ -18,14 +18,22 @@ func isReady(r Row) bool { return r.Block == "" && (r.Source == "auto" || r.Sour
 
 // shadowKey applies a key press to want. prev is the model before the key; it only says what the key targets
 // (the row or place under the cursor, the rows or places in view).
-func shadowKey(want map[string]bool, prev Model, key string) {
-	if prev.PlacePrompt != "" { // the optional-rows question: only y selects, and only a place with nothing ready
-		if key != "y" {
+//
+// sp is the place the optional-rows question is open for, tracked here by rules of its own (opened by space on an
+// optional-only place, closed by y, n, esc, a small window, a rescan, an exclusion or a deletion); it is never read
+// from the model.
+func shadowKey(want map[string]bool, sp *string, prev Model, key string) {
+	if *sp != "" { // the optional-rows question: only y selects, and only a place with nothing ready
+		place := *sp
+		if prev.small() || key == "y" || key == "n" || key == "<esc>" {
+			*sp = ""
+		}
+		if key != "y" || prev.small() {
 			return
 		}
 		var opt []string
 		for _, r := range prev.Rows {
-			if r.Place != prev.PlacePrompt {
+			if r.Place != place {
 				continue
 			}
 			if isReady(r) {
@@ -62,6 +70,8 @@ func shadowKey(want map[string]bool, prev Model, key string) {
 					for _, p := range opt {
 						delete(want, p)
 					}
+				} else {
+					*sp = cp.Name
 				}
 				return
 			}
@@ -137,9 +147,14 @@ func shadowKey(want map[string]bool, prev Model, key string) {
 }
 
 // shadowMsg applies a message to want; m is the model before it.
-func shadowMsg(want map[string]bool, m Model, msg Msg) {
+func shadowMsg(want map[string]bool, sp *string, m Model, msg Msg) {
 	switch msg := msg.(type) {
+	case ResizeMsg:
+		if msg.Width != 0 && (msg.Width < minWidth || msg.Height < minHeight) {
+			*sp = ""
+		}
 	case ExclusionChangedMsg:
+		*sp = ""
 		if !msg.Excluded {
 			return
 		}
@@ -149,6 +164,7 @@ func shadowMsg(want map[string]bool, m Model, msg Msg) {
 			}
 		}
 	case DeleteDoneMsg:
+		*sp = ""
 		gone := map[string]bool{}
 		for _, p := range msg.Result.Removed {
 			gone[p] = true
@@ -170,6 +186,7 @@ func shadowMsg(want map[string]bool, m Model, msg Msg) {
 		if m.Screen == ScreenResult && m.Result.Pending {
 			return // a running deletion comes first
 		}
+		*sp = ""
 		first := map[string]Row{}
 		for _, r := range msg.Rows {
 			if _, ok := first[r.Path]; !ok {

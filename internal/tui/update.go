@@ -9,6 +9,9 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		return updateKey(m, msg)
 	case ResizeMsg:
 		m.W, m.H = msg.Width, msg.Height
+		if m.small() {
+			m.PlacePrompt = "" // the view only asks for a larger window: nothing may act unseen
+		}
 		return m, nil
 	case ScanProgressMsg:
 		return scanProgress(m, msg), nil
@@ -26,7 +29,7 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		m.Summary = msg.Summary
 		m.Screen, m.Back = ScreenPlaces, ScreenPlaces
 		m.Place, m.Filter, m.PlacesFilter, m.Filtering = "", "", "", false
-		m.Confirm = nil
+		m.Confirm, m.PlacePrompt = nil, ""
 		sel := map[string]bool{}
 		for _, r := range m.Rows {
 			if m.Selected[r.Path] && r.selectable() {
@@ -101,7 +104,7 @@ func deleteDone(m Model, r Result) Model {
 	r.Pending = false
 	m.Result = r
 	m.Screen = ScreenResult
-	m.Confirm = nil
+	m.Confirm, m.PlacePrompt = nil, ""
 	switch m.listScreen() {
 	case ScreenPlace:
 		if len(m.visible()) == 0 { // the delete emptied the open place
@@ -120,6 +123,7 @@ func deleteDone(m Model, r Result) Model {
 }
 
 func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
+	m.PlacePrompt = "" // the rows it asked about are changing
 	if m.Screen == ScreenConfirm {
 		m.Screen = m.listScreen()
 		m.Confirm = nil

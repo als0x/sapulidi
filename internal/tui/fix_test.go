@@ -388,8 +388,9 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 		m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()}) // starts on the places
 		m, _ = Update(m, UncoveredMsg{Unknown: unknownSummary().Unknown})
 		want := map[string]bool{} // the selection, tracked by rules of its own
+		var sp string             // the open optional-rows question, tracked by rules of its own
 		apply := func(msg Msg) {
-			shadowMsg(want, m, msg)
+			shadowMsg(want, &sp, m, msg)
 			m, _ = Update(m, msg)
 		}
 		for step := range 80 {
@@ -413,7 +414,7 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 				var eff []Effect
 				key := alphabet[rng.Intn(len(alphabet))]
 				m, eff = keys(m, key)
-				shadowKey(want, prev, key) // only space and a change the selection; every other key leaves it alone
+				shadowKey(want, &sp, prev, key) // only space and a change the selection; every other key leaves it alone
 				for _, e := range eff {
 					switch e := e.(type) {
 					case AddExclusion:
@@ -435,6 +436,18 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 			}
 			if msg != nil {
 				apply(msg)
+			}
+			if m.PlacePrompt != sp {
+				t.Fatalf("seq %d step %d: prompt %q, tracked %q", seq, step, m.PlacePrompt, sp)
+			}
+			if m.PlacePrompt != "" {
+				found := false
+				for _, p := range m.allPlaces() {
+					found = found || p.Name == m.PlacePrompt
+				}
+				if m.Screen != ScreenPlaces || m.small() || !found {
+					t.Fatalf("seq %d step %d: prompt %q open on screen %v small %v place found %v", seq, step, m.PlacePrompt, m.Screen, m.small(), found)
+				}
 			}
 			for p := range want {
 				if !m.Selected[p] {
