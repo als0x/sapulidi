@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -62,10 +63,13 @@ func nestedRepos(ctx context.Context, dir string) (repos []nestedRepo, tooMany b
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if d.Name() == ".git" {
+		if gn := gitName(d.Name()); gn != 0 {
 			r := nestedRepo{path: filepath.Dir(p), kind: "git"}
 			if !d.IsDir() {
 				r.kind = "gitfile"
+			}
+			if gn == 2 {
+				r.kind = "gitname"
 			}
 			if !add(r) {
 				return fs.SkipAll
@@ -166,28 +170,18 @@ func scanConfig(path string) (cfg nestedConfig, reason string) {
 	if err != nil || len(raw) > maxRead {
 		return cfg, "config"
 	}
-	var lines []string
-	cur := ""
-	for _, l := range strings.Split(string(raw), "\n") {
-		l = strings.TrimSuffix(l, "\r")
-		if strings.HasSuffix(l, "\\") {
-			cur += strings.TrimSuffix(l, "\\")
-			continue
-		}
-		lines = append(lines, cur+l)
-		cur = ""
+	// git's line rules (a backslash continues a value but not a comment, a lone CR) are not emulated: a plain clone
+	// config has no backslash, no NUL and no CR outside a CRLF line end, so anything else keeps the repository.
+	text := string(raw)
+	if strings.ContainsAny(text, "\\\x00") || strings.Contains(strings.ReplaceAll(text, "\r\n", ""), "\r") {
+		return cfg, "config"
 	}
-	if cur != "" {
-		lines = append(lines, cur)
-	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	section, sub := "", ""
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
 		if l == "" || l[0] == '#' || l[0] == ';' {
 			continue
-		}
-		if strings.Contains(l, "\\") && l[0] == '[' {
-			return cfg, "config"
 		}
 		if l[0] == '[' {
 			rest, tail := l[1:], ""
@@ -239,11 +233,11 @@ func scanConfig(path string) (cfg nestedConfig, reason string) {
 		}
 		switch {
 		case section == "core" && key == "bare":
-			if v := strings.ToLower(val); v == "true" || v == "yes" || v == "on" || v == "1" {
+			if v := strings.ToLower(val); v != "false" && v != "no" && v != "off" && v != "0" {
 				return cfg, "bare"
 			}
 		case section == "remote" && (key == "url" || key == "pushurl"):
-			if strings.ContainsAny(val, "\"\\#;") {
+			if strings.ContainsAny(val, "\"\\#;") || !remoteName(sub) {
 				return cfg, "config"
 			}
 			cfg.remotes[sub] = append(cfg.remotes[sub], val)
@@ -270,12 +264,64 @@ func networkURL(u string) bool {
 	if i := strings.Index(u, "://"); i > 0 {
 		switch lower[:i] {
 		case "http", "https", "ssh", "git":
-			return true
+			auth, _, _ := strings.Cut(u[i+3:], "/")
+			if at := strings.LastIndexByte(auth, '@'); at >= 0 {
+				auth = auth[at+1:]
+			}
+			if strings.HasPrefix(auth, "[") {
+				auth, _, _ = strings.Cut(strings.TrimPrefix(auth, "["), "]")
+			} else {
+				auth, _, _ = strings.Cut(auth, ":")
+			}
+			return !loopbackHost(auth)
 		}
 		return false
 	}
 	c := strings.IndexByte(u, ':')
-	return c > 1 && !strings.Contains(u[:c], "/")
+	if c <= 1 || strings.Contains(u[:c], "/") {
+		return false
+	}
+	host := u[:c]
+	if at := strings.LastIndexByte(host, '@'); at >= 0 {
+		host = host[at+1:]
+	}
+	return !loopbackHost(host)
+}
+
+// loopbackHost is an empty, local or loopback host: a remote there is this machine, not a place work was pushed to.
+func loopbackHost(h string) bool {
+	h = strings.ToLower(strings.Trim(h, "[]"))
+	return h == "" || h == "localhost" || h == "0.0.0.0" || h == "::1" || strings.HasPrefix(h, "127.")
+}
+
+// remoteName accepts the plain names a clone gives a remote; the name goes into a ref glob.
+func remoteName(s string) bool {
+	if s == "" || s[0] == '-' || s[0] == '.' {
+		return false
+	}
+	return configName(strings.ReplaceAll(strings.ReplaceAll(s, "_", "-"), "/", "-"), true)
+}
+
+// hfsIgnorable are the code points HFS+ and APFS ignore inside a name, so ".g<U+200C>it" is ".git" to git there.
+func hfsIgnorable(r rune) bool {
+	return r >= 0x200c && r <= 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x206a && r <= 0x206f || r == 0xfeff
+}
+
+// gitName classifies a directory entry name: 0 not .git, 1 .git (any case), 2 .git spelled with ignorable characters.
+func gitName(name string) int {
+	stripped := strings.Map(func(r rune) rune {
+		if hfsIgnorable(r) {
+			return -1
+		}
+		return r
+	}, name)
+	switch {
+	case !strings.EqualFold(stripped, ".git"):
+		return 0
+	case stripped != name:
+		return 2
+	}
+	return 1
 }
 
 func present(path string) bool {
@@ -294,8 +340,15 @@ func nonEmptyDir(path string) bool {
 // scanGitDir keeps a repository that borrows objects, rewrites history or has linked worktrees: the work could live
 // outside the artefact.
 func scanGitDir(gitDir string) string {
-	if present(filepath.Join(gitDir, "objects", "info", "alternates")) {
+	if present(filepath.Join(gitDir, "objects", "info", "alternates")) ||
+		present(filepath.Join(gitDir, "objects", "info", "http-alternates")) {
 		return "alternates"
+	}
+	// These send git to a config, objects or refs somewhere other than what was scanned.
+	for _, n := range []string{"commondir", "gitdir", "config.worktree"} {
+		if present(filepath.Join(gitDir, n)) {
+			return "redirect"
+		}
 	}
 	if present(filepath.Join(gitDir, "info", "grafts")) || nonEmptyDir(filepath.Join(gitDir, "refs", "replace")) {
 		return "replace"
@@ -331,6 +384,8 @@ func nestedUnsafe(ctx context.Context, run core.Runner, r nestedRepo) string {
 		return "bare"
 	case "otherfs":
 		return "other-filesystem"
+	case "gitname":
+		return "gitname"
 	}
 	// Files first: nothing below starts git until the repository's own config, alternates, replace refs and linked
 	// worktrees are known to be plain.
@@ -387,7 +442,17 @@ func nestedUnsafe(ctx context.Context, run core.Runner, r nestedRepo) string {
 		return "stash"
 	}
 	// --all: every local ref, tags, notes and stash included, and HEAD.
-	if out, ok = g("--no-replace-objects", "rev-list", "--all", "--not", "--remotes", "--max-count=1"); !ok {
+	// Only the refs of the validated remotes count, not any hand-made refs/remotes/<x>/ branch.
+	args := []string{"--no-replace-objects", "rev-list", "--all", "--max-count=1", "--not"}
+	names := make([]string, 0, len(cfg.remotes))
+	for name := range cfg.remotes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		args = append(args, "--glob=refs/remotes/"+name+"/*")
+	}
+	if out, ok = g(args...); !ok {
 		return "error"
 	} else if strings.TrimSpace(out) != "" {
 		return "unpushed"

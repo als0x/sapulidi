@@ -84,7 +84,11 @@ Every auto category and what its proof is, so no auto rule rests on a name or an
   overrides do not stop it, so the proof first reads `.git/config` as a file (allow-list of plain clone settings) and
   starts no git when anything else is in it; the remaining exposure is the one in the fsmonitor section below. Ignored
   files are not listed by `git status`: a credential-looking one is caught by the secret guard, but any other ignored
-  local file inside a nested repository is lost with the artefact.
+  local file inside a nested repository is lost with the artefact. "Pushed" means contained in the remote-tracking
+  refs of the repository's own configured remotes, which are the last fetched state, not a live check of the remote.
+  A filter driver defined in the user's OWN global git config (git-lfs for example) can still run on a nested
+  repository that has a `.gitattributes`: that is the user's own binary, and the global config is kept on purpose.
+  The config scan refuses any backslash, NUL or lone carriage return rather than copying git's line joining.
 - Optional categories are not auto: they need an explicit opt-in, and every one of them still passes S5.
 
 ## Uninstall `--all` checks

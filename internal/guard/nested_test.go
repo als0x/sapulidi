@@ -318,6 +318,104 @@ func TestNestedBudgetBoundsTheWholeProof(t *testing.T) {
 	wantWhy(t, err, "nested-git")
 }
 
+func TestScanConfigRefusesWhatGitReadsDifferently(t *testing.T) {
+	plain := "[core]\n\trepositoryformatversion = 0\n"
+	url := "[remote \"origin\"]\n\turl = https://h/r.git\n"
+	cases := []struct{ name, body, reason string }{
+		{"filter hidden behind comment continuations",
+			plain + "# a \\\n[filter \"x\"]\n# b \\\n\tclean = /tmp/evil.sh\n" + url, "config"},
+		{"filter behind a value comment continuation",
+			plain + "\tfilemode = true # x \\\n[filter \"x\"]\n\tclean = /tmp/evil.sh\n" + url, "config"},
+		{"lone carriage return", plain + "\r[filter \"x\"]\r\tclean = c\r" + url, "config"},
+		{"NUL", plain + "\x00" + url, "config"},
+		{"CRLF line ends are fine", strings.ReplaceAll(plain+url, "\n", "\r\n"), ""},
+		{"bare = false", plain + "\tbare = false\n", ""},
+		{"bare off", plain + "\tbare = OFF\n", ""},
+		{"bare without a value", plain + "\tbare\n", "bare"},
+		{"bare empty", plain + "\tbare =\n", "bare"},
+		{"bare unknown", plain + "\tbare = maybe\n", "bare"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := filepath.Join(realDir(t), "config")
+			write(t, p, tc.body)
+			if _, got := scanConfig(p); got != tc.reason {
+				t.Fatalf("reason = %q, want %q", got, tc.reason)
+			}
+		})
+	}
+}
+
+func TestNestedHiddenFilterNeverRuns(t *testing.T) {
+	_, dir := projectRepo(t)
+	clone := nestedClone(t, dir, "out/src")
+	marker := filepath.Join(realDir(t), "filter-ran")
+	write(t, filepath.Join(clone, ".git", "info", "attributes"), "* filter=x\n")
+	write(t, filepath.Join(clone, ".git", "config"), "[core]\n\trepositoryformatversion = 0\n# a \\\n[filter \"x\"]\n# b \\\n"+
+		"\tclean = touch '"+marker+"'; cat\n[remote \"origin\"]\n\turl = https://h/r.git\n")
+	write(t, filepath.Join(clone, "a.txt"), "changed\n")
+	wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), "config")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a filter hidden behind a comment continuation ran")
+	}
+}
+
+func TestNestedOddlySpelledGitDirectories(t *testing.T) {
+	t.Run("upper case .GIT with unpushed work", func(t *testing.T) {
+		_, dir := projectRepo(t)
+		clone := nestedClone(t, dir, "out/src")
+		write(t, filepath.Join(clone, "b.txt"), "b\n")
+		git(t, clone, "add", "b.txt")
+		nestedCommit(t, clone, "local")
+		if err := os.Rename(filepath.Join(clone, ".git"), filepath.Join(clone, ".GIT")); err != nil {
+			t.Fatal(err)
+		}
+		wantWhy(t, ProjectArtifact(execx.Real{}, dir, markers), "nested-git")
+	})
+	t.Run("zero-width characters inside the name", func(t *testing.T) {
+		_, dir := projectRepo(t)
+		write(t, filepath.Join(dir, "out", "src", ".g‌it", "x"), "x")
+		wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), "gitname")
+	})
+}
+
+func TestNestedRedirectingGitDirEntries(t *testing.T) {
+	for _, name := range []string{"commondir", "gitdir", "config.worktree", filepath.Join("objects", "info", "http-alternates")} {
+		t.Run(name, func(t *testing.T) {
+			_, dir := projectRepo(t)
+			clone := nestedClone(t, dir, "out/src")
+			write(t, filepath.Join(clone, ".git", name), "/elsewhere\n")
+			reason := "redirect"
+			if strings.Contains(name, "alternates") {
+				reason = "alternates"
+			}
+			wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), reason)
+		})
+	}
+}
+
+func TestNestedHandMadeRemoteRefDoesNotCount(t *testing.T) {
+	_, dir := projectRepo(t)
+	clone := nestedClone(t, dir, "out/src")
+	write(t, filepath.Join(clone, "b.txt"), "b\n")
+	git(t, clone, "add", "b.txt")
+	nestedCommit(t, clone, "local")
+	git(t, clone, "update-ref", "refs/remotes/mirror/main", "HEAD")
+	wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), "unpushed")
+}
+
+func TestNetworkURLRefusesLoopback(t *testing.T) {
+	for u, want := range map[string]bool{
+		"https://localhost/r.git": false, "ssh://git@127.0.0.1/r": false, "http://[::1]:8080/r": false,
+		"git@localhost:o/r.git": false, "https://0.0.0.0/r": false, "https://user@github.com:443/r": true,
+		"git@127.0.0.2:r": false, "https:///r": false,
+	} {
+		if got := networkURL(u); got != want {
+			t.Errorf("networkURL(%q) = %v, want %v", u, got, want)
+		}
+	}
+}
+
 func TestNestedGitOutputIsCapped(t *testing.T) {
 	_, dir := projectRepo(t)
 	nestedClone(t, dir, "out/src")
