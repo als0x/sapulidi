@@ -312,10 +312,10 @@ func TestSpaceOnAPlaceSelectsReadyRowsOnly(t *testing.T) {
 	if mark := placeMark(m.places()[1]); mark != "[x]" {
 		t.Fatalf("mark %q", mark)
 	}
-	// optional-only place: says so, changes nothing
+	// optional-only place: asks first, selects nothing yet
 	m, _ = keys(placesModel(), "jj ")
-	if len(m.Selected) != 0 || m.Status != "only optional rows here: open it and pick them" {
-		t.Fatalf("optional-only: %v %q", m.Selected, m.Status)
+	if len(m.Selected) != 0 || m.PlacePrompt == "" {
+		t.Fatalf("optional-only: %v %q", m.Selected, m.PlacePrompt)
 	}
 	// kept-only place (visible with g)
 	m, _ = keys(placesModel(), "g")
@@ -325,7 +325,7 @@ func TestSpaceOnAPlaceSelectsReadyRowsOnly(t *testing.T) {
 		}
 	}
 	m, _ = keys(m, " ")
-	if len(m.Selected) != 0 || m.Status != "only kept rows here" {
+	if len(m.Selected) != 0 || m.Status != "protected: nothing here can be removed from this screen" {
 		t.Fatalf("kept-only: %v %q", m.Selected, m.Status)
 	}
 	// a partly selected place shows [~]

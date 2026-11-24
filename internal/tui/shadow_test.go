@@ -18,7 +18,65 @@ func isReady(r Row) bool { return r.Block == "" && (r.Source == "auto" || r.Sour
 
 // shadowKey applies a key press to want. prev is the model before the key; it only says what the key targets
 // (the row or place under the cursor, the rows or places in view).
-func shadowKey(want map[string]bool, prev Model, key string) {
+//
+// sp is the place the optional-rows question is open for, tracked here by rules of its own (opened by space on an
+// optional-only place, closed by y, n, esc, a small window, a rescan, an exclusion or a deletion); it is never read
+// from the model.
+func shadowKey(want map[string]bool, sp *string, prev Model, key string) {
+	if *sp != "" { // the optional-rows question: only y selects, and only a place with nothing ready
+		place := *sp
+		if prev.small() || key == "y" || key == "n" || key == "<esc>" {
+			*sp = ""
+		}
+		if key != "y" || prev.small() {
+			return
+		}
+		var opt []string
+		for _, r := range prev.Rows {
+			if r.Place != place {
+				continue
+			}
+			if isReady(r) {
+				return
+			}
+			if isSel(r) {
+				opt = append(opt, r.Path)
+			}
+		}
+		for _, p := range opt {
+			want[p] = true
+		}
+		return
+	}
+	if prev.Screen == ScreenPlaces && !prev.Filtering && !prev.small() && key == " " {
+		// an optional-only place asks first; when all its optional rows are selected, space clears them
+		if cp, ok := prev.cursorPlace(); ok {
+			var opt []string
+			ready := false
+			for _, r := range prev.Rows {
+				if r.Place == cp.Name {
+					ready = ready || isReady(r)
+					if isSel(r) && !isReady(r) {
+						opt = append(opt, r.Path)
+					}
+				}
+			}
+			if !ready && len(opt) > 0 {
+				all := true
+				for _, p := range opt {
+					all = all && want[p]
+				}
+				if all {
+					for _, p := range opt {
+						delete(want, p)
+					}
+				} else {
+					*sp = cp.Name
+				}
+				return
+			}
+		}
+	}
 	if prev.Filtering || prev.small() || key != " " && key != "a" {
 		return // typed text, a blocked key, or a key that never touches the selection
 	}
@@ -89,9 +147,14 @@ func shadowKey(want map[string]bool, prev Model, key string) {
 }
 
 // shadowMsg applies a message to want; m is the model before it.
-func shadowMsg(want map[string]bool, m Model, msg Msg) {
+func shadowMsg(want map[string]bool, sp *string, m Model, msg Msg) {
 	switch msg := msg.(type) {
+	case ResizeMsg:
+		if msg.Width != 0 && (msg.Width < minWidth || msg.Height < minHeight) {
+			*sp = ""
+		}
 	case ExclusionChangedMsg:
+		*sp = ""
 		if !msg.Excluded {
 			return
 		}
@@ -101,6 +164,7 @@ func shadowMsg(want map[string]bool, m Model, msg Msg) {
 			}
 		}
 	case DeleteDoneMsg:
+		*sp = ""
 		gone := map[string]bool{}
 		for _, p := range msg.Result.Removed {
 			gone[p] = true
@@ -122,6 +186,7 @@ func shadowMsg(want map[string]bool, m Model, msg Msg) {
 		if m.Screen == ScreenResult && m.Result.Pending {
 			return // a running deletion comes first
 		}
+		*sp = ""
 		first := map[string]Row{}
 		for _, r := range msg.Rows {
 			if _, ok := first[r.Path]; !ok {

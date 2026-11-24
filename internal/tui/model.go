@@ -193,6 +193,7 @@ type Model struct {
 	Sort         SortKey
 	Filter       string
 	Filtering    bool
+	PlacePrompt  string // the place whose optional rows `space` asked about; "" when no prompt is open
 	Place        string // the open place (ScreenPlace, and the detail or confirmation opened from it)
 	PlacesFilter string // the places search, kept while a place is open
 	Back         Screen // the list screen that detail, confirmation and result return to
