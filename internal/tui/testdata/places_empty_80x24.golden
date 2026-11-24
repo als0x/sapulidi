@@ -1,12 +1,13 @@
-+- summary -----------------------------------+ +- keys -----------------------+
-| agents installed: 2                         | | q: quit       d: delete      |
-| to remove: 0 B, 0 of 0 selected             | | / : search    s: sort        |
-| excluded: 0                                 | | enter: open   space: select  |
-| schedule: every 30m, next 14:30             | | c: view       a: select all  |
-| disk free: 37.3 GB -> 37.3 GB               | | g: guarded    esc: reset     |
-| kept: 1 | g                                 | +------------------------------+
-+---------------------------------------------+                                 
++- summary --------------------------------------------------------------------+
+| Free now: 0 B automatic | 0 B if you choose | 1 protected                    |
+| to remove: 0 B, 0 of 0 selected | excluded: 0                                |
+| agents installed: 2 | schedule: every 30m, next 14:30                        |
+| disk free: 37.3 GB -> 37.3 GB                                                |
+| kept: 1 | g                                                                  |
+| not covered by any rule: searching...                                        |
++------------------------------------------------------------------------------+
          ready  optional place                                  kept updatedAt 
+  ready = removable now | optional = you pick it | kept = protected
   nothing is ready to delete
   kept: 1 | g
 
@@ -19,6 +20,5 @@
 
 
 
-
-
 0 places, sorted by ready + optional size, largest first
+enter open | space select | d delete | g protected | c view | ? help | q quit

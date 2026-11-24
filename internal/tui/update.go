@@ -36,6 +36,16 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		m.Selected = sel
 		m.Pinned = ""
 		m.Cursor = firstPlace(m) // the places open on something that can be deleted
+		// second phase: the uncovered folders are searched after the places are on screen
+		m.Summary.Unknown, m.Summary.UnknownPartial = nil, false
+		m.UnkState = UnkSearching
+		return m, []Effect{StartUncovered{}}
+	case UncoveredMsg:
+		if m.UnkState != UnkSearching {
+			return m, nil // cancelled, or a message of an older scan: nothing on screen changes
+		}
+		m.Summary.Unknown, m.Summary.UnknownPartial = slices.Clone(msg.Unknown), msg.Partial
+		m.UnkState = UnkDone
 		return m, nil
 	case DeleteDoneMsg:
 		return deleteDone(m, msg.Result), nil
@@ -180,6 +190,10 @@ func updateKey(m Model, k KeyMsg) (Model, []Effect) {
 		return placesKey(m, k)
 	case ScreenList, ScreenPlace:
 		return listKey(m, k)
+	case ScreenHelp:
+		return helpKey(m, k)
+	case ScreenUnknown:
+		return unknownKey(m, k)
 	case ScreenDetail:
 		return detailKey(m, k)
 	case ScreenConfirm:
@@ -233,6 +247,10 @@ func listKeyInner(m Model, k KeyMsg) (Model, []Effect) {
 		m.Cursor = firstSelectable(m)
 	case k.Rune == 'c':
 		m = toggleView(m)
+	case k.Rune == '?':
+		m = openHelp(m)
+	case k.Rune == 'u':
+		m = openUnknown(m)
 	case k.Rune == 'q':
 		return m, []Effect{Quit{}}
 	case k.Rune == '/':

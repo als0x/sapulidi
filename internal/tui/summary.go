@@ -11,6 +11,7 @@ import (
 
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/engine"
+	"github.com/als0x/sapulidi/internal/report"
 	"github.com/als0x/sapulidi/internal/tui/term"
 )
 
@@ -43,6 +44,22 @@ type EngineDeps struct {
 	freeNow uint64
 	roots   []string
 	bases   []string
+
+	planEnv core.Env // the environment of the last scan and its plan: what the uncovered search needs
+	plan    engine.Summary
+}
+
+// Uncovered implements UncoveredDeps: the search `report` runs for folders no rule covers, over the plan of the last
+// scan. It ends with ctx (esc, quit) and says partial then, or when its own 30 s budget ran out.
+func (e *EngineDeps) Uncovered(ctx context.Context) ([]Uncovered, bool) {
+	env := e.planEnv
+	env.Ctx = ctx
+	dirs, partial := report.ScanUncovered(&env, e.plan)
+	out := make([]Uncovered, 0, len(dirs))
+	for _, d := range dirs {
+		out = append(out, Uncovered{Path: d.Path, Bytes: d.Bytes})
+	}
+	return out, partial
 }
 
 // withResolved adds the symlink-resolved spelling of each base (/tmp and /private/tmp on macOS) when it differs;
@@ -104,6 +121,7 @@ func (e *EngineDeps) Scan(ctx context.Context, progress func(category string, do
 		e.roots = append(e.roots, r.Path)
 	}
 	e.bases = withResolved(cleanBases(append(slices.Clone(env.Platform.ScratchBases()), env.TempDir)))
+	e.planEnv, e.plan = cp, sum // kept for the second phase, Uncovered
 	return rowsOf(sum), nil
 }
 

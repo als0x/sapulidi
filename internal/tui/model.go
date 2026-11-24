@@ -15,8 +15,10 @@ const (
 	ScreenDetail
 	ScreenConfirm
 	ScreenResult
-	ScreenPlaces // the start screen after the scan: one row per place
-	ScreenPlace  // the rows of Model.Place
+	ScreenPlaces  // the start screen after the scan: one row per place
+	ScreenPlace   // the rows of Model.Place
+	ScreenHelp    // `?`: what the columns, markers and keys mean
+	ScreenUnknown // `u`: the big folders no rule covers, read-only
 )
 
 // SortKey is the list order.
@@ -81,6 +83,33 @@ func (ScanProgressMsg) isMsg()     {}
 func (ScanDoneMsg) isMsg()         {}
 func (DeleteDoneMsg) isMsg()       {}
 func (ExclusionChangedMsg) isMsg() {}
+func (UncoveredMsg) isMsg()        {}
+
+// UncoveredMsg ends the second phase of the scan: the big folders no rule covers. Partial is set when the search ran
+// out of time or was cut short, so the sizes are lower bounds. It is dropped unless the search is still wanted.
+type UncoveredMsg struct {
+	Unknown []Uncovered
+	Partial bool
+}
+
+// UnkState is where the search for uncovered folders stands. The zero value is a finished search.
+type UnkState int
+
+// The states of the uncovered-folder search.
+const (
+	UnkDone      UnkState = iota
+	UnkSearching          // started after the places appeared; its message has not come yet
+	UnkCancelled          // the user pressed esc on the places: a late message is ignored
+)
+
+// StartUncovered asks for the uncovered-folder search (the second phase) to begin.
+type StartUncovered struct{}
+
+// CancelUncovered asks for the running uncovered-folder search to stop.
+type CancelUncovered struct{}
+
+func (StartUncovered) isEffect()  {}
+func (CancelUncovered) isEffect() {}
 
 // Effect is something the caller must do after Update.
 type Effect interface{ isEffect() }
@@ -121,6 +150,15 @@ type SummaryData struct {
 	Roots    []string      // project roots of the scan; a row under one belongs to the longest match
 	Bases    []string      // agent scratch bases and the temp dir; rows under one (and no root) share its place
 	Home     string        // the home directory, shown as ~ in places
+
+	Unknown        []Uncovered // big folders no rule covers, largest first, at most 20
+	UnknownPartial bool        // the search for them ran out of time or was cancelled
+}
+
+// Uncovered is a big folder that no rule covers; it is only ever shown, never selectable.
+type Uncovered struct {
+	Path  string
+	Bytes int64
 }
 
 // Result is what the engine reported for a deletion.
@@ -163,6 +201,11 @@ type Model struct {
 	Confirm      []string // the paths the confirmation was opened for; `y` revalidates them
 	ConfirmTop   int      // first confirmation entry shown (the list scrolls)
 	Result       Result
+	HelpFrom     Screen // the screen `?` was pressed on
+	HelpTop      int    // first help line shown (the help scrolls)
+	UnkFrom      Screen // the screen `u` was pressed on
+	UnkTop       int    // first uncovered folder shown
+	UnkState     UnkState
 	W, H         int // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
 }
 

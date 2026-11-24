@@ -1,12 +1,13 @@
-+- summary -------------------------------------------------------------------+ +- keys -------------------------------+
-| agents installed: 2                                                         | | esc: reset    d: delete              |
-| to remove: 0 B, 0 of 6 selected                                             | | / : search    s: sort                |
-| excluded: 1                                                                 | | enter: detail space: select          |
-| schedule: every 30m, next 14:30                                             | | x: exclude    a: select all          |
-| disk free: 37.3 GB -> 37.3 GB                                               | | o: optional   g: guarded             |
-| optional (off): 1 | 762.9 MB | o                                            | | q: quit       c: view                |
-+-----------------------------------------------------------------------------+ +--------------------------------------+
++- summary ------------------------------------------------------------------------------------------------------------+
+| Free now: 4.1 GB automatic | 762.9 MB if you choose | 1 protected                                                    |
+| to remove: 0 B, 0 of 6 selected | excluded: 1                                                                        |
+| agents installed: 2 | schedule: every 30m, next 14:30                                                                |
+| disk free: 37.3 GB -> 37.3 GB                                                                                        |
+| optional (off): 1 | 762.9 MB | o                                                                                     |
+| not covered by any rule: searching...                                                                                |
++----------------------------------------------------------------------------------------------------------------------+
           size path                                                                    age   updatedAt  source          
+  auto = removable now | optional = you pick it | kept = protected
  [ ]    2.9 GB /home/user/.cache/go-build                                              22mo  2026-11-01 auto            
  [ ]    1.1 GB /home/user/proj/node_modules                                            8mo   2026-06-30 optional-on     
  [-]  667.6 MB /home/user/proj2/target                                                 10mo  2026-09-09 excluded        
@@ -35,6 +36,5 @@
 
 
 
-
-
 kept by a guard: git repository with uncommitted work
+enter detail | space select | d delete | o optional | c view | ? help | q quit

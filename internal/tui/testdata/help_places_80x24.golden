@@ -1,0 +1,24 @@
+What you are looking at
+
+Columns
+  ready     removable now: a rule is on and every guard passed
+  optional  removable only if you pick it (a rule that is switched off)
+  kept      protected: a guard keeps it (open files, unsaved work, ...)
+  place     the folder or tool cache the rows belong to
+  In the flat list the source column says the same: auto = ready.
+
+Markers
+  [ ] not selected   [x] selected   [~] some rows of a place selected
+  [-] nothing here can be selected
+
+Keys
+  enter  open a place, or show the details of a row
+  space  select a row; on a place: select its ready rows
+  a      places: select the ready rows of the places in view
+         inside a place: its ready rows; flat list: every row in view
+         (optional ones too once o shows them)
+  o      flat list: show or hide optional rows (places always list them)
+  g      show or hide protected (kept) rows
+  c      switch between the places and the flat list
+  x      exclude the row under the cursor (flat list, inside a place)
+lines 1-23 of 31 | up/down scroll | esc or ? close | q quit

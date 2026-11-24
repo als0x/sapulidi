@@ -381,12 +381,13 @@ func randomRows(rng *rand.Rand) []Row {
 }
 
 func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
-	alphabet := []string{"j", "k", " ", "a", "x", "s", "o", "/", "d", "y", "n", "q", "e", "g", "<esc>", "<enter>", "<up>", "<down>", "<bs>", "c", "c"}
+	alphabet := []string{"j", "k", " ", "a", "x", "s", "o", "/", "d", "y", "n", "q", "e", "g", "<esc>", "<enter>", "<up>", "<down>", "<bs>", "c", "c", "?", "u", "?", "u"}
 	sizes := []ResizeMsg{{70, 20}, {80, 24}, {120, 40}, {80, 300}}
 	for seq := range 400 {
 		rng := rand.New(rand.NewSource(int64(seq)))
 		m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()}) // starts on the places
-		want := map[string]bool{}                                                                   // the selection, tracked by rules of its own
+		m, _ = Update(m, UncoveredMsg{Unknown: unknownSummary().Unknown})
+		want := map[string]bool{} // the selection, tracked by rules of its own
 		apply := func(msg Msg) {
 			shadowMsg(want, m, msg)
 			m, _ = Update(m, msg)
@@ -395,6 +396,8 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 			prev := m
 			var msg Msg
 			switch r := rng.Intn(20); {
+			case r == 4:
+				msg = UncoveredMsg{Unknown: unknownSummary().Unknown, Partial: rng.Intn(2) == 0}
 			case r == 0:
 				msg = ResizeMsg(sizes[rng.Intn(len(sizes))])
 			case r == 1:
@@ -453,6 +456,21 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 			for p := range m.Selected {
 				if !rowSel[p] {
 					t.Fatalf("seq %d step %d: %s is selected but cannot be", seq, step, p)
+				}
+			}
+			if m.Screen == ScreenHelp || m.Screen == ScreenUnknown {
+				// the selection and the delete list are untouched here, and the screen still fits the window
+				w, h := m.size()
+				if w >= minWidth && h >= minHeight {
+					lines := View(m, w, h)
+					if len(lines) > h {
+						t.Fatalf("seq %d step %d: screen %v has %d lines in %d rows", seq, step, m.Screen, len(lines), h)
+					}
+					for _, l := range lines {
+						if width(l) > w {
+							t.Fatalf("seq %d step %d: screen %v line too wide: %q", seq, step, m.Screen, l)
+						}
+					}
 				}
 			}
 			if m.Screen == ScreenConfirm {

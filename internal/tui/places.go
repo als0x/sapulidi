@@ -250,6 +250,11 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Special == KeyEsc:
 		m.Filter = ""
 		m.Cursor = firstPlace(m)
+		if m.UnkState == UnkSearching { // esc also stops the second phase
+			m.UnkState = UnkCancelled
+			m.Status = "search for uncovered folders cancelled"
+			return m, []Effect{CancelUncovered{}}
+		}
 	case k.Rune == 'q':
 		return m, []Effect{Quit{}}
 	case k.Rune == '/':
@@ -273,6 +278,10 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 		m.Status = "optional rows are always listed here"
 	case k.Rune == 'c':
 		m = toggleView(m)
+	case k.Rune == '?':
+		m = openHelp(m)
+	case k.Rune == 'u':
+		m = openUnknown(m)
 	case k.Rune == 'x':
 		m.Status = "open the place to exclude a row"
 	case k.Rune == 'd':
@@ -424,9 +433,14 @@ func placesHead(pw int) string {
 func viewPlaces(m Model, w, h int) []string {
 	lines := topPanels(m, w)
 	pw := w - 42
-	lines = append(lines, style(m.Plain, "1", placesHead(pw)))
+	lines = append(lines, style(m.Plain, "1", placesHead(pw)), cut("  "+legend(m, "ready"), w))
+	if s := nothingReadyLine(m); s != "" {
+		for _, l := range strings.Split(s, "\n") { // two lines: the whole sentence must fit 80 columns
+			lines = append(lines, cut("  "+l, w))
+		}
+	}
 	vis := m.places()
-	rowsH := h - len(lines) - 1
+	rowsH := h - len(lines) - 2
 	top := min(max(m.Cursor-rowsH/2, 0), max(len(vis)-rowsH, 0))
 	if len(vis) == 0 {
 		if m.Filter != "" {
@@ -441,10 +455,30 @@ func viewPlaces(m Model, w, h int) []string {
 	for i := top; i < len(vis) && i < top+rowsH; i++ {
 		lines = append(lines, placeRow(m, vis[i], i == m.Cursor, pw))
 	}
-	for len(lines) < h-1 {
+	for len(lines) < h-2 {
 		lines = append(lines, "")
 	}
-	return append(lines, placesStatus(m, vis, w))
+	return append(lines, placesStatus(m, vis, w), cut(footerOf(m), w))
+}
+
+// nothingReadyLine says so in plain words when no row is ready but some can be chosen by hand; "" otherwise.
+func nothingReadyLine(m Model) string {
+	var optN int
+	var optB int64
+	var optU bool
+	for _, r := range m.Rows {
+		switch {
+		case readyRow(r):
+			return ""
+		case r.selectable():
+			optN++
+			addBytes(&optB, &optU, r.Bytes)
+		}
+	}
+	if optN == 0 {
+		return ""
+	}
+	return fmt.Sprintf("nothing is ready to delete automatically;\n%s can be chosen by hand: press enter on a place", sizeCell(1, optB, optU))
 }
 
 func placesStatus(m Model, vis []place, w int) string {
