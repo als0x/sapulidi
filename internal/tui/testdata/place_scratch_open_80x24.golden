@@ -1,0 +1,24 @@
++- summary -----------------------------------+ +- keys -----------------------+
+| agents installed: 2                         | | esc: places   d: delete      |
+| to remove: 0 B, 0 of 6 selected             | | / : search    s: sort        |
+| excluded: 2                                 | | enter: detail space: select  |
+| schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
+| disk free: 37.3 GB -> 37.3 GB               | | g: guarded    c: view        |
++---------------------------------------------+ | q: quit                      |
+                                                +------------------------------+
+          size path                            age   updatedAt  source          
+>[ ]    3.8 MB /private/tmp/c...Users-x-old/s9 -     2026-01-02 auto            
+ [ ]  976.6 KB /private/tmp/c...Users-y-old/s8 -     2026-01-03 auto            
+ [-]         ? /private/tmp/c...ers-x-proj0/s0 -     2026-11-10 kept-active     
+ [-]         ? /private/tmp/c...ers-x-proj1/s1 -     2026-11-11 kept-active     
+ [-]         ? /private/tmp/c...ers-x-proj2/s2 -     2026-11-12 kept-active     
+ [-]         ? /private/tmp/c...ers-x-proj3/s3 -     2026-11-13 kept-active     
+ [-]         ? /private/tmp/c...ers-x-proj4/s4 -     2026-11-14 kept-active     
+ [-]         ? /private/tmp/c...ers-x-proj5/s5 -     2026-11-15 kept-active     
+
+
+
+
+
+
+/private/tmp/claude-502/ 8 rows, sorted by size, largest first

@@ -21,7 +21,7 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		}
 		m.Rows = dedupeRows(msg.Rows)
 		for i := range m.Rows {
-			m.Rows[i].Place = placeOfRow(m.Rows[i], msg.Summary.Roots, msg.Summary.Home)
+			m.Rows[i].Place = placeOfRow(m.Rows[i], msg.Summary.Roots, msg.Summary.Bases, msg.Summary.Home)
 		}
 		m.Summary = msg.Summary
 		m.Screen, m.Back = ScreenPlaces, ScreenPlaces

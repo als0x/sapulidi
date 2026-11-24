@@ -8,28 +8,39 @@ import (
 	"time"
 )
 
-// placeOf is the place of an absolute path: the longest root that is a path-segment prefix of it (the root
-// itself), else the parent directory. Home is shown as ~ and a place ends with "/". A path that is not absolute has
-// no place here: "" (placeOfRow names it by its category).
-func placeOf(path string, roots []string, home string) string {
+// placeOf is the place of an absolute path, in this order: the longest root that is a path-segment prefix of it
+// (the root itself); else the longest base that is a path-segment prefix of it and not the path itself (a base
+// holds the throw-away working folders of tools); else the parent directory. Home is shown as ~ and a place ends
+// with "/". A path that is not absolute has no place here: "" (placeOfRow names it by its category).
+func placeOf(path string, roots, bases []string, home string) string {
 	if !filepath.IsAbs(path) {
 		return ""
 	}
 	path = filepath.Clean(path)
-	best := ""
-	for _, r := range roots {
-		r = strings.TrimRight(r, "/")
-		if r == "" || !filepath.IsAbs(r) {
-			continue
-		}
-		if (path == r || strings.HasPrefix(path, r+"/")) && len(r) > len(best) {
-			best = r
-		}
+	best := longestPrefix(path, roots, true)
+	if best == "" {
+		best = longestPrefix(path, bases, false)
 	}
 	if best == "" {
 		best = filepath.Dir(path)
 	}
 	return showHome(best, home)
+}
+
+// longestPrefix is the longest absolute entry of dirs that is a path-segment prefix of path; with self the path
+// itself counts too.
+func longestPrefix(path string, dirs []string, self bool) string {
+	best := ""
+	for _, d := range dirs {
+		d = strings.TrimRight(d, "/")
+		if d == "" || !filepath.IsAbs(d) {
+			continue
+		}
+		if ((self && path == d) || strings.HasPrefix(path, d+"/")) && len(d) > len(best) {
+			best = d
+		}
+	}
+	return best
 }
 
 // showHome abbreviates home to ~ and ends the place with "/".
@@ -45,8 +56,8 @@ func showHome(dir, home string) string {
 }
 
 // placeOfRow is the place of a row: rows without a real path go to "commands · <category>".
-func placeOfRow(r Row, roots []string, home string) string {
-	if p := placeOf(r.Path, roots, home); p != "" {
+func placeOfRow(r Row, roots, bases []string, home string) string {
+	if p := placeOf(r.Path, roots, bases, home); p != "" {
 		return p
 	}
 	return "commands · " + clean(r.Category)
@@ -248,6 +259,9 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Rune == ' ':
 		if curOK {
 			m = selectReadyIn(m, []place{cur})
+			if cur.ReadyN > 1 && m.Status == "" && m.placeReadySelected(cur.Name) {
+				m.Status = fmt.Sprintf("selected %d ready rows in %s (enter to see them)", cur.ReadyN, cur.Name)
+			}
 		}
 	case k.Rune == 's':
 		m.Sort = nextPlacesSort(m.Sort)
@@ -265,6 +279,16 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 		return openConfirm(m)
 	}
 	return m, nil
+}
+
+// placeReadySelected reports whether every ready row of the place is selected.
+func (m Model) placeReadySelected(name string) bool {
+	for _, r := range m.Rows {
+		if r.Place == name && readyRow(r) && !m.Selected[r.Path] {
+			return false
+		}
+	}
+	return true
 }
 
 // selectReadyIn toggles every READY row of the given places: when all of them are selected they are deselected.

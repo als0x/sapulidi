@@ -1,0 +1,40 @@
++- summary -------------------------------------------------------------------+ +- keys -------------------------------+
+| agents installed: 2                                                         | | q: quit       d: delete              |
+| to remove: 0 B, 0 of 6 selected                                             | | / : search    s: sort                |
+| excluded: 2                                                                 | | enter: open   space: select          |
+| schedule: every 30m, next 14:30                                             | | c: view       a: select all          |
+| disk free: 37.3 GB -> 37.3 GB                                               | | g: guarded    esc: reset             |
++-----------------------------------------------------------------------------+ +--------------------------------------+
+         ready  optional place                                                                          kept updatedAt 
+>[ ]    1.1 GB         - ~/proj/                                                                           1 2026-11-21
+ [ ]  762.9 MB         - ~/.nvm/versions/node/                                                             1 2026-11-20
+ [ ]         -  762.9 MB ~/old/                                                                            - 2025-02-03
+ [ ]    4.8 MB         - /private/tmp/claude-502/                                                          6 2026-11-15
+ [-]         -         - commands | docker                                                                 - -         
+ [-]         -         - ~/ex/                                                                             - -         
+ [-]         -         - ~/keptonly/                                                                       1 2026-11-20
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1 ready | 0 optional | 1 kept | 1 excluded. enter to look inside

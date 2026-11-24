@@ -119,6 +119,7 @@ type SummaryData struct {
 	FreeNow  uint64        // free disk bytes now; 0 = unknown
 	Paused   bool          // the pause file exists
 	Roots    []string      // project roots of the scan; a row under one belongs to the longest match
+	Bases    []string      // agent scratch bases and the temp dir; rows under one (and no root) share its place
 	Home     string        // the home directory, shown as ~ in places
 }
 

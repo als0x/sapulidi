@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -79,18 +81,151 @@ func TestPlaceOf(t *testing.T) {
 		{"docker system prune", ""}, // no path: the row wrapper names it
 		{"relative/dir", ""},
 	} {
-		if got := placeOf(c.path, roots, home); got != c.want {
+		if got := placeOf(c.path, roots, nil, home); got != c.want {
 			t.Errorf("placeOf(%q) = %q, want %q", c.path, got, c.want)
 		}
 	}
-	if got := placeOfRow(Row{Path: "docker system prune", Category: "docker"}, nil, home); got != pCmd {
+	if got := placeOfRow(Row{Path: "docker system prune", Category: "docker"}, nil, nil, home); got != pCmd {
 		t.Errorf("path-less row: %q", got)
 	}
-	if got := placeOf("/hx/thing", nil, "/h"); got != "/hx/" { // home is a segment prefix too
+	if got := placeOf("/hx/thing", nil, nil, "/h"); got != "/hx/" { // home is a segment prefix too
 		t.Errorf("home sibling: %q", got)
 	}
-	if got := placeOf("/home/user/x", nil, ""); got != "/home/user/" {
+	if got := placeOf("/home/user/x", nil, nil, ""); got != "/home/user/" {
 		t.Errorf("no home: %q", got)
+	}
+}
+
+func TestPlaceOfBases(t *testing.T) {
+	home := "/home/user"
+	roots := []string{"/tmp/claude-502/-proj-rooted"}
+	bases := []string{"/tmp/claude-502", "/tmp/claude-502/deep/", "/a/b", "/var/folders/xx/T", "", "rel/base", "/tmp/claude-502"}
+	for _, c := range []struct{ path, want string }{
+		{"/tmp/claude-502/-Users-x-proj/0a1b2c", "/tmp/claude-502/"},
+		{"/tmp/claude-502/-Users-y-other/3d4e5f", "/tmp/claude-502/"},
+		{"/tmp/claude-502/-proj-rooted/s1", "/tmp/claude-502/-proj-rooted/"}, // root beats base
+		{"/tmp/claude-502", "/tmp/"},                                         // the base itself: parent rule
+		{"/tmp/claude-502/deep/x/y", "/tmp/claude-502/deep/"},                // nested bases: longest wins
+		{"/a/bc/x", "/a/bc/"},                                                // /a/b is not a segment prefix of /a/bc
+		{"/a/b/x", "/a/b/"},
+		{"/var/folders/xx/T/go-build-1", "/var/folders/xx/T/"},
+		{"/var/folders/xx/T/go-build-1/a/b", "/var/folders/xx/T/"},
+		{"/elsewhere/x/y", "/elsewhere/x/"},
+		{"rel/base/x", ""},
+	} {
+		if got := placeOf(c.path, roots, bases, home); got != c.want {
+			t.Errorf("placeOf(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+	if got := placeOf("/z/y/q", nil, nil, home); got != "/z/y/" {
+		t.Errorf("no bases: %q", got)
+	}
+}
+
+func TestCleanBases(t *testing.T) {
+	got := cleanBases([]string{"/a/", "", "rel", "/a", "/b"})
+	if want := []string{"/a", "/b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("cleanBases = %v, want %v", got, want)
+	}
+}
+
+func TestWithResolvedAddsTheOtherSpelling(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	link := filepath.Join(dir, "link")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := []string{link, filepath.Join(dir, "missing")}
+	got := withResolved(in)
+	if want := []string{link, filepath.Join(dir, "missing"), resolved}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("withResolved = %v, want %v", got, want)
+	}
+	if len(in) != 2 {
+		t.Fatalf("input changed: %v", in)
+	}
+}
+
+func TestBothSpellingsOfABaseShareOnePlace(t *testing.T) {
+	bases := []string{"/tmp/claude-502", "/private/tmp/claude-502"}
+	a := placeOf("/private/tmp/claude-502/x/y", nil, bases, "/home/user")
+	b := placeOf("/tmp/claude-502/z/w", nil, bases, "/home/user")
+	if a != "/private/tmp/claude-502/" || b != "/tmp/claude-502/" {
+		t.Fatalf("places %q %q", a, b)
+	}
+	// a row spelled with the resolved form, base given only as /tmp plus its resolved form: one place per spelling,
+	// and the resolved row lands under the resolved base rather than /private/tmp/claude-502/x/
+	if got := placeOf("/private/tmp/claude-502/x/y", nil, bases[:1], "/home/user"); got != "/private/tmp/claude-502/x/" {
+		t.Fatalf("without the resolved form: %q", got)
+	}
+}
+
+func TestSpaceOnAManyRowPlaceSaysSo(t *testing.T) {
+	m, _ := keys(scratchModel(), "jjj ")
+	if want := "selected 2 ready rows in " + pScratch + " (enter to see them)"; m.Status != want {
+		t.Fatalf("status %q, want %q", m.Status, want)
+	}
+	one, _ := keys(placesModel(), "jj ") // ~/old/ has no ready row; nvm below has two
+	if strings.Contains(one.Status, "selected") {
+		t.Fatalf("unexpected status %q", one.Status)
+	}
+	again, _ := keys(m, " ") // deselect: no message
+	if again.Status != "" {
+		t.Fatalf("deselect status %q", again.Status)
+	}
+}
+
+const pScratch = "/private/tmp/claude-502/"
+
+func scratchRows() []Row {
+	rows := placesRows()
+	for i := 0; i < 6; i++ {
+		rows = append(rows, Row{
+			Path:  fmt.Sprintf("/private/tmp/claude-502/-Users-x-proj%d/s%d", i, i),
+			Bytes: -1, Updated: day(2026, 11, 10+i), Source: SrcKept, Guard: "active", Category: "agent", RuleKey: "agent/scratch@1",
+		})
+	}
+	rows = append(rows,
+		Row{Path: "/private/tmp/claude-502/-Users-x-old/s9", Bytes: 4_000_000, Updated: day(2026, 1, 2), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
+		Row{Path: "/private/tmp/claude-502/-Users-y-old/s8", Bytes: 1_000_000, Updated: day(2026, 1, 3), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
+	)
+	return rows
+}
+
+func scratchModel() Model {
+	s := placesSummary()
+	s.Bases = []string{"/private/tmp/claude-502"}
+	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: scratchRows(), Summary: s})
+	return m
+}
+
+func TestScratchRowsShareOnePlace(t *testing.T) {
+	m := scratchModel()
+	if got, want := placeNames(m), []string{pProj, pNVM, pOld, pScratch, pCmd, pEx}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("places = %v, want %v", got, want)
+	}
+	g, _ := keys(m, "g")
+	n := 0
+	for _, p := range g.places() {
+		if strings.HasPrefix(p.Name, "/private/") {
+			n++
+			if p.Name != pScratch || p.ReadyN != 2 || p.KeptN != 6 || !p.Updated.Equal(day(2026, 11, 15)) {
+				t.Errorf("scratch place: %+v", p)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("scratch places with g: %d, want 1: %v", n, placeNames(g))
+	}
+	if len(placeNames(g)) != 7 {
+		t.Fatalf("with g: %v", placeNames(g))
 	}
 }
 
@@ -576,5 +711,7 @@ func init() {
 		{"places_guarded", open("g")},
 		{"places_selected", open("ajj ")},
 		{"places_empty", emptyPlacesModel},
+		{"places_scratch", func() Model { m, _ := keys(scratchModel(), "g"); return m }},
+		{"place_scratch_open", func() Model { m, _ := keys(scratchModel(), "gjjj<enter>"); return m }},
 	}...)
 }
