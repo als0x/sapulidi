@@ -135,11 +135,18 @@ check "an existing dist/: the files are as they were" test "$(sig)" = "$before"
 
 # The reason for the order: the binary embeds the manifests, so a version bump changes its bytes.
 if [ "$have_go" = 1 ]; then
-	C=$work/real
-	sed 's/"version": "[^"]*"/"version": "9.8.7"/' "$C/.claude-plugin/plugin.json" >"$work/plugin.json"
-	cat "$work/plugin.json" >"$C/.claude-plugin/plugin.json"
-	go_build "$C" "$work/after"
-	check "a plugin.json version change changes the binary" test "$(cksum <"$work/before")" != "$(cksum <"$work/after")"
+	# Whatever version the tree carries, "-probe" is appended, so the change is real on a clean and on a bumped tree.
+	probe() { # dir label
+		go_build "$1" "$work/$2-before"
+		sed 's/"version": "\([^"]*\)"/"version": "\1-probe"/' "$1/.claude-plugin/plugin.json" >"$work/plugin-$2.json"
+		cat "$work/plugin-$2.json" >"$1/.claude-plugin/plugin.json"
+		go_build "$1" "$work/$2-after"
+		check "a plugin.json version change changes the binary ($2 tree)" test "$(cksum <"$work/$2-before")" != "$(cksum <"$work/$2-after")"
+	}
+	probe "$work/real" clean
+	# the "ok" copy was bumped by release.sh above: the same check on a tree that already carries the new version
+	cp -R "$work/ok" "$work/bumped"
+	probe "$work/bumped" bumped
 else
 	echo "skip: the local go cannot build offline (GOTOOLCHAIN=local, GOPROXY=off); the reproducibility check was not run"
 fi
