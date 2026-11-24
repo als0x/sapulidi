@@ -68,9 +68,11 @@ type Env struct {
 
 // Excluder matches paths against the user's exclusions; *exclude.List implements it (core cannot import exclude).
 type Excluder interface {
-	// Match reports an entry equal to, containing or inside candidate's folder form (candidate is inside an entry).
+	// Match reports an entry that covers candidate or that candidate contains: the entry equals candidate, candidate
+	// is inside the entry, or the entry is inside candidate.
 	Match(candidate string) (matched string, ok bool)
-	// Within reports an entry inside candidate (candidate contains an exclusion).
+	// Within reports an entry that covers candidate only: candidate is the entry or inside it. An entry that merely
+	// sits inside candidate does not count.
 	Within(candidate string) (matched string, ok bool)
 }
 

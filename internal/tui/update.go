@@ -114,6 +114,7 @@ func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
 		} else if !c.Excluded && r.Source == SrcExcluded {
 			m.Rows[i].Source = r.origin()
 			m.Rows[i].Base = ""
+			m.Rows[i].Origin = ""
 		}
 	}
 	return m
