@@ -1,12 +1,11 @@
-+- summary -------------------------------------------------------------------+ +- keys -------------------------------+
-| agents installed: 2                                                         | | esc: places   d: delete              |
-| to remove: 0 B, 0 of 6 selected                                             | | / : search    s: sort                |
-| excluded: 2                                                                 | | enter: detail space: select          |
-| schedule: every 30m, next 14:30                                             | | x: exclude    a: select all          |
-| disk free: 37.3 GB -> 37.3 GB                                               | | g: guarded    c: view                |
-+-----------------------------------------------------------------------------+ | q: quit                              |
-                                                                                +--------------------------------------+
++- summary ------------------------------------------------------------------------------------------------------------+
+| Free now: 1.9 GB automatic | 762.9 MB if you choose | 9 protected                                                    |
+| to remove: 0 B, 0 of 6 selected | excluded: 2                                                                        |
+| agents installed: 2 | schedule: every 30m, next 14:30                                                                |
+| disk free: 37.3 GB -> 37.3 GB                                                                                        |
++----------------------------------------------------------------------------------------------------------------------+
           size path                                                                    age   updatedAt  source          
+  auto = removable now | optional = you pick it | kept = protected
 >[ ]    3.8 MB /private/tmp/claude-502/-Users-x-old/s9                                 -     2026-01-02 auto            
  [ ]  976.6 KB /private/tmp/claude-502/-Users-y-old/s8                                 -     2026-01-03 auto            
  [-]         ? /private/tmp/claude-502/-Users-x-proj0/s0                               -     2026-11-10 kept-active     
@@ -38,3 +37,4 @@
 
 
 /private/tmp/claude-502/ 8 rows, sorted by size, largest first
+esc back | enter detail | space select | x exclude | d delete | ? help | q quit

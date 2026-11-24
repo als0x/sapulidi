@@ -298,6 +298,17 @@ func (m Model) listScreen() Screen {
 	switch m.Screen {
 	case ScreenList, ScreenPlaces, ScreenPlace:
 		return m.Screen
+	case ScreenHelp:
+		from := m
+		from.Screen = m.HelpFrom
+		if m.HelpFrom == ScreenUnknown {
+			from.Screen = m.UnkFrom
+		}
+		return from.listScreen()
+	case ScreenUnknown:
+		from := m
+		from.Screen = m.UnkFrom
+		return from.listScreen()
 	}
 	switch m.Back {
 	case ScreenPlaces, ScreenPlace:

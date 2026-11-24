@@ -15,8 +15,10 @@ const (
 	ScreenDetail
 	ScreenConfirm
 	ScreenResult
-	ScreenPlaces // the start screen after the scan: one row per place
-	ScreenPlace  // the rows of Model.Place
+	ScreenPlaces  // the start screen after the scan: one row per place
+	ScreenPlace   // the rows of Model.Place
+	ScreenHelp    // `?`: what the columns, markers and keys mean
+	ScreenUnknown // `u`: the big folders no rule covers, read-only
 )
 
 // SortKey is the list order.
@@ -121,6 +123,15 @@ type SummaryData struct {
 	Roots    []string      // project roots of the scan; a row under one belongs to the longest match
 	Bases    []string      // agent scratch bases and the temp dir; rows under one (and no root) share its place
 	Home     string        // the home directory, shown as ~ in places
+
+	Unknown        []Uncovered // big folders no rule covers, largest first, at most 20
+	UnknownPartial bool        // the search for them ran out of time or was cancelled
+}
+
+// Uncovered is a big folder that no rule covers; it is only ever shown, never selectable.
+type Uncovered struct {
+	Path  string
+	Bytes int64
 }
 
 // Result is what the engine reported for a deletion.
@@ -163,7 +174,11 @@ type Model struct {
 	Confirm      []string // the paths the confirmation was opened for; `y` revalidates them
 	ConfirmTop   int      // first confirmation entry shown (the list scrolls)
 	Result       Result
-	W, H         int // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
+	HelpFrom     Screen // the screen `?` was pressed on
+	HelpTop      int    // first help line shown (the help scrolls)
+	UnkFrom      Screen // the screen `u` was pressed on
+	UnkTop       int    // first uncovered folder shown
+	W, H         int    // window size from ResizeMsg; 0 = not reported yet (taken as large enough)
 }
 
 // NewModel is the model before the scan starts.

@@ -45,7 +45,10 @@ the scheduled run (`--schedule off` removes it, `--schedule` alone shows it), fo
 Run `sapulidi` with no arguments in a terminal. It scans and opens on a list of **places**: the folders where it
 found something (a project, a toolchain folder), with what is ready to delete, what is optional, what a guard keeps
 and when it last changed. `enter` opens a place and lists its rows; every deletion still goes through the engine and
-its safety checks. Keys: `up`/`down` move, `enter` open a place or a row's detail, `space` select (on a place: every
+its safety checks. The first line of the summary answers the question: what is free now automatically, what if you
+choose, and how many rows are protected. `?` opens a help screen that explains the columns, the markers and the keys,
+and `u` lists, read-only, the big folders that no rule covers (found with the same search as `report`; nothing there
+can be selected or deleted). Keys: `up`/`down` move, `enter` open a place or a row's detail, `space` select (on a place: every
 ready row in it, never the optional ones), `a` select all (on the places and inside a place: ready rows only, never the optional ones; in the flat list: every row in
 view), `d` delete the selection (its confirmation scrolls with `up`/`down`, `j`/`k`, `PgUp`/`PgDn`), `x` exclude, `c` switch between the places and the flat list, `o` show optional rows in the flat list
 (places always list them), `g` show what a guard keeps (guarded, with the reason; on the places it also lists

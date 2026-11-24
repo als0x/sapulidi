@@ -97,6 +97,11 @@ var goldenCases = []struct {
 	{"list_empty", emptyModel},
 	{"wholesale_row", cursorOn("/home/user/.npm/_cacache")},
 	{"paused", pausedModel},
+	{"help", script("?")},
+	{"help_places", func() Model { m, _ := keys(placesModel(), "?"); return m }},
+	{"uncovered", func() Model { m, _ := keys(modelOf(placesRows(), unknownSummary()), "u"); return m }},
+	{"places_uncovered", func() Model { return modelOf(placesRows(), unknownSummary()) }},
+	{"places_nothing_ready", func() Model { return modelOf(realMachineRows(), placesSummary()) }},
 }
 
 func TestGoldenScreens(t *testing.T) {

@@ -1,12 +1,12 @@
-+- summary -----------------------------------+ +- keys -----------------------+
-| agents installed: 2                         | | q: quit       d: delete      |
-| to remove: 0 B, 0 of 4 selected             | | / : search    s: sort        |
-| excluded: 2                                 | | enter: open   space: select  |
-| schedule: every 30m, next 14:30             | | c: view       a: select all  |
-| disk free: 37.3 GB -> 37.3 GB               | | g: guarded    esc: reset     |
-| kept: 3 | g                                 | +------------------------------+
-+---------------------------------------------+                                 
++- summary --------------------------------------------------------------------+
+| Free now: 1.9 GB automatic | 762.9 MB if you choose | 3 protected            |
+| to remove: 0 B, 0 of 4 selected | excluded: 2                                |
+| agents installed: 2 | schedule: every 30m, next 14:30                        |
+| disk free: 37.3 GB -> 37.3 GB                                                |
+| kept: 3 | g                                                                  |
++------------------------------------------------------------------------------+
          ready  optional place                                  kept updatedAt 
+  ready = removable now | optional = you pick it | kept = protected
 >[ ]    1.1 GB         - ~/proj/                                   1 2026-11-21
  [ ]  762.9 MB         - ~/.nvm/versions/node/                     1 2026-11-20
  [ ]         -  762.9 MB ~/old/                                    - 2025-02-03
@@ -20,5 +20,5 @@
 
 
 
-
 1 ready | 0 optional | 1 kept | 1 excluded. enter to look inside
+enter open | space select | d delete | g protected | c view | ? help | q quit

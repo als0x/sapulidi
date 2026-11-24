@@ -1,12 +1,12 @@
-+- summary -----------------------------------+ +- keys -----------------------+
-| agents installed: 2                         | | esc: places   d: delete      |
-| to remove: 0 B, 0 of 4 selected             | | / : search    s: sort        |
-| excluded: 2                                 | | enter: detail space: select  |
-| schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
-| disk free: 37.3 GB -> 37.3 GB               | | g: guarded    c: view        |
-| kept: 3 | g                                 | | q: quit                      |
-+---------------------------------------------+ +------------------------------+
++- summary --------------------------------------------------------------------+
+| Free now: 1.9 GB automatic | 762.9 MB if you choose | 3 protected            |
+| to remove: 0 B, 0 of 4 selected | excluded: 2                                |
+| agents installed: 2 | schedule: every 30m, next 14:30                        |
+| disk free: 37.3 GB -> 37.3 GB                                                |
+| kept: 3 | g                                                                  |
++------------------------------------------------------------------------------+
           size path                            age   updatedAt  source          
+  auto = removable now | optional = you pick it | kept = protected
 >[ ]    1.1 GB /home/user/proj/node_modules    8mo   2026-11-01 optional-on     
  [-]  667.6 MB /home/user/proj/target          -     2026-09-09 excluded        
 
@@ -20,5 +20,5 @@
 
 
 
-
 ~/proj/ 2 rows, sorted by size, largest first
+esc back | enter detail | space select | x exclude | d delete | ? help | q quit

@@ -1,6 +1,9 @@
 package tui
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	minWidth  = 80
@@ -23,6 +26,10 @@ func View(m Model, width, height int) []string {
 		lines = viewScanning(m, width, height)
 	case m.Screen == ScreenPlaces:
 		lines = viewPlaces(m, width, height)
+	case m.Screen == ScreenHelp:
+		lines = viewHelp(m, width, height)
+	case m.Screen == ScreenUnknown:
+		lines = viewUnknown(m, width, height)
 	case m.Screen == ScreenDetail:
 		lines = viewDetail(m, width, height)
 	case m.Screen == ScreenConfirm:
@@ -66,22 +73,6 @@ func panel(plain bool, title string, body []string, w int) []string {
 	return append(out, bl+repeat(h, w-2)+br)
 }
 
-func sideBySide(a, b []string, aw, bw int) []string {
-	n := max(len(a), len(b))
-	out := make([]string, n)
-	for i := range out {
-		l, r := repeat(" ", aw), repeat(" ", bw)
-		if i < len(a) {
-			l = a[i]
-		}
-		if i < len(b) {
-			r = b[i]
-		}
-		out[i] = l + " " + r
-	}
-	return out
-}
-
 func center(block []string, w, h int) []string {
 	bw := 0
 	for _, l := range block {
@@ -113,15 +104,6 @@ func viewScanning(m Model, w, h int) []string {
 	}
 	block = append(block, "", "esc: cancel")
 	return center(block, w, h)
-}
-
-var keyHelp = [][2]string{
-	{"esc: reset", "d: delete"},
-	{"/ : search", "s: sort"},
-	{"enter: detail", "space: select"},
-	{"x: exclude", "a: select all"},
-	{"o: optional", "g: guarded"},
-	{"q: quit", "c: view"},
 }
 
 // hiddenLines are the summary lines that say what the default list leaves out; none when nothing is hidden.
@@ -194,52 +176,85 @@ func summaryLines(m Model) []string {
 		}
 		disk = "disk free: " + fmtBytes(int64(m.Summary.FreeNow)) + " " + arrow(m.Plain) + " " + after
 	}
+	d := dot(m.Plain)
 	lines := []string{
-		fmt.Sprintf("agents installed: %d", m.Summary.Agents),
-		fmt.Sprintf("to remove: %s, %d of %d selected", total, len(sel), selectable),
-		fmt.Sprintf("excluded: %d", excluded),
-		sched,
+		headline(m),
+		fmt.Sprintf("to remove: %s, %d of %d selected %s excluded: %d", total, len(sel), selectable, d, excluded),
+		fmt.Sprintf("agents installed: %d %s %s", m.Summary.Agents, d, sched),
 		disk,
 	}
-	return append(lines, hiddenLines(m)...)
+	lines = append(lines, hiddenLines(m)...)
+	if u := unknownLine(m); u != "" {
+		lines = append(lines, u)
+	}
+	return lines
 }
 
-// placesKeyHelp is the keys panel of the places screen: no `o`, optional rows are always listed.
-var placesKeyHelp = [][2]string{
-	{"q: quit", "d: delete"},
-	{"/ : search", "s: sort"},
-	{"enter: open", "space: select"},
-	{"c: view", "a: select all"},
-	{"g: guarded", "esc: reset"},
+// headline answers the first question: how much can go now, how much if the user chooses, how much is protected.
+func headline(m Model) string {
+	var autoB, optB int64
+	var autoU, optU bool
+	var kept int
+	for _, r := range m.Rows {
+		switch {
+		case r.Source == SrcKept:
+			kept++
+		case readyRow(r):
+			addBytes(&autoB, &autoU, r.Bytes)
+		case r.selectable():
+			addBytes(&optB, &optU, r.Bytes)
+		}
+	}
+	d := dot(m.Plain)
+	return fmt.Sprintf("Free now: %s automatic %s %s if you choose %s %d protected",
+		sizeCell(1, autoB, autoU), d, sizeCell(1, optB, optU), d, kept)
 }
 
-// placeKeyHelp is the keys panel inside a place.
-var placeKeyHelp = [][2]string{
-	{"esc: places", "d: delete"},
-	{"/ : search", "s: sort"},
-	{"enter: detail", "space: select"},
-	{"x: exclude", "a: select all"},
-	{"g: guarded", "c: view"},
-	{"q: quit", ""},
+// unknownLine is the summary line of the folders no rule covers; "" when there are none and the search finished.
+func unknownLine(m Model) string {
+	if len(m.Summary.Unknown) == 0 && !m.Summary.UnknownPartial {
+		return ""
+	}
+	var total int64
+	for _, u := range m.Summary.Unknown {
+		total += u.Bytes
+	}
+	s := fmt.Sprintf("not covered by any rule: %s %s %s", plural(len(m.Summary.Unknown), "folder"), dot(m.Plain), fmtBytes(total))
+	if m.Summary.UnknownPartial {
+		s += " partial"
+	}
+	return s + "  (u)"
 }
 
-// topPanels draws the summary and the keys of the screen side by side.
-func topPanels(m Model, w int) []string {
-	rw := max(32, w/3)
-	lw := w - rw - 1
-	left := panel(m.Plain, "summary", summaryLines(m), lw)
-	help := keyHelp
+// legend explains the words of the list; first is the word of the removable-now column ("ready" or "auto").
+func legend(m Model, first string) string {
+	d := dot(m.Plain)
+	return first + " = removable now " + d + " optional = you pick it " + d + " kept = protected"
+}
+
+// footerOf is the one-line keys footer of the current screen.
+func footerOf(m Model) string {
+	d := " " + dot(m.Plain) + " "
+	join := func(k ...string) string { return strings.Join(k, d) }
+	if m.Filtering {
+		return join("type to search", "enter keep", "esc clear")
+	}
 	switch m.Screen {
 	case ScreenPlaces:
-		help = placesKeyHelp
+		return join("enter open", "space select", "d delete", "g protected", "c view", "? help", "q quit")
 	case ScreenPlace:
-		help = placeKeyHelp
+		return join("esc back", "enter detail", "space select", "x exclude", "d delete", "? help", "q quit")
+	case ScreenHelp:
+		return join("up/down scroll", "esc or ? close")
+	case ScreenUnknown:
+		return join("up/down scroll", "esc back", "? help", "q quit")
 	}
-	keys := make([]string, len(help))
-	for i, k := range help {
-		keys[i] = fit(k[0], 14) + k[1]
-	}
-	return sideBySide(left, panel(m.Plain, "keys", keys, rw), lw, rw)
+	return join("enter detail", "space select", "d delete", "o optional", "c view", "? help", "q quit")
+}
+
+// topPanels draws the summary at the full width of the window.
+func topPanels(m Model, w int) []string {
+	return panel(m.Plain, "summary", summaryLines(m), w)
 }
 
 func viewList(m Model, w, h int) []string {
@@ -247,10 +262,10 @@ func viewList(m Model, w, h int) []string {
 
 	pw := w - 49
 	head := " " + "    " + fitRight("size", 9) + " " + fit("path", pw) + " " + fit("age", 5) + " " + fit("updatedAt", 10) + " " + fit("source", 16)
-	lines = append(lines, style(m.Plain, "1", head))
+	lines = append(lines, style(m.Plain, "1", head), cut("  "+legend(m, "auto"), w))
 
 	vis := m.visible()
-	rowsH := h - len(lines) - 1
+	rowsH := h - len(lines) - 2
 	top := min(max(m.Cursor-rowsH/2, 0), max(len(vis)-rowsH, 0))
 	if len(vis) == 0 {
 		if m.Filter != "" {
@@ -265,10 +280,10 @@ func viewList(m Model, w, h int) []string {
 	for i := top; i < len(vis) && i < top+rowsH; i++ {
 		lines = append(lines, listRow(m, vis[i], i == m.Cursor, pw))
 	}
-	for len(lines) < h-1 {
+	for len(lines) < h-2 {
 		lines = append(lines, "")
 	}
-	return append(lines, statusLine(m, vis, w))
+	return append(lines, statusLine(m, vis, w), cut(footerOf(m), w))
 }
 
 func listRow(m Model, r Row, cur bool, pw int) string {

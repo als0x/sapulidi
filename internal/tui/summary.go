@@ -11,6 +11,7 @@ import (
 
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/engine"
+	"github.com/als0x/sapulidi/internal/report"
 	"github.com/als0x/sapulidi/internal/tui/term"
 )
 
@@ -43,6 +44,9 @@ type EngineDeps struct {
 	freeNow uint64
 	roots   []string
 	bases   []string
+
+	unknown        []Uncovered
+	unknownPartial bool
 }
 
 // withResolved adds the symlink-resolved spelling of each base (/tmp and /private/tmp on macOS) when it differs;
@@ -104,12 +108,19 @@ func (e *EngineDeps) Scan(ctx context.Context, progress func(category string, do
 		e.roots = append(e.roots, r.Path)
 	}
 	e.bases = withResolved(cleanBases(append(slices.Clone(env.Platform.ScratchBases()), env.TempDir)))
+	e.unknown, e.unknownPartial = nil, false
+	dirs, partial := report.ScanUncovered(&cp, sum) // the same search `report` runs; ends with ctx (esc)
+	for _, d := range dirs {
+		e.unknown = append(e.unknown, Uncovered{Path: d.Path, Bytes: d.Bytes})
+	}
+	e.unknownPartial = partial
 	return rowsOf(sum), nil
 }
 
 // Summary implements Deps.
 func (e *EngineDeps) Summary() SummaryData {
-	s := SummaryData{Now: e.now, FreeNow: e.freeNow, Roots: slices.Clone(e.roots), Bases: slices.Clone(e.bases)}
+	s := SummaryData{Now: e.now, FreeNow: e.freeNow, Roots: slices.Clone(e.roots), Bases: slices.Clone(e.bases),
+		Unknown: slices.Clone(e.unknown), UnknownPartial: e.unknownPartial}
 	s.Home, _ = os.UserHomeDir()
 	if e.now.IsZero() {
 		s.Now = time.Now()
