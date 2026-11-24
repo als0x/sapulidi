@@ -1,6 +1,6 @@
 #!/bin/sh
 # sapulidi launcher: fetch the pinned binary once, verify it, then run it.
-SAPULIDI_VERSION=0.1.0
+SAPULIDI_VERSION=0.2.0
 # The repo-wide no-machine-path test only allows the owner name inside this full form, so the pinned
 # SAPULIDI_REPO (owner/sapulidi) is derived from it.
 SAPULIDI_HOME=github.com/als0x/sapulidi

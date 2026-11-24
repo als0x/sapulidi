@@ -1,6 +1,6 @@
 {
   "name": "sapulidi",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Removes what coding agents and toolchains leave behind on macOS and Linux, safely, with nothing to install by hand.",
   "author": { "name": "Al Ambari" },
   "license": "MIT",
