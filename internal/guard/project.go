@@ -37,7 +37,8 @@ func resolveGitDir(parent, p string) string {
 }
 
 // ProjectArtifact is spec S5 for per-project artefacts: marker next to it, inside a git work tree
-// that is not a linked worktree, git-ignored, with no tracked file and no nested .git inside.
+// that is not a linked worktree, git-ignored, with no tracked file, and every nested repository inside clean and
+// fully pushed (nestedProof).
 func ProjectArtifact(run core.Runner, dir string, markers []string) error {
 	if di, err := os.Lstat(dir); err != nil {
 		return core.Keep("error", err.Error())
@@ -89,14 +90,7 @@ func ProjectArtifact(run core.Runner, dir string, markers []string) error {
 		}
 		return gitFail(err)
 	}
-	nested, werr := HoldsRepo(context.Background(), dir)
-	if werr != nil {
-		return core.Keep("error", werr.Error())
-	}
-	if nested {
-		return core.Keep("nested-git", "a .git entry inside "+base)
-	}
-	return nil
+	return nestedProof(run, dir)
 }
 
 // HoldsRepo reports whether path, or anything inside it, is a git repository: a .git entry or a bare

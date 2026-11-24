@@ -75,6 +75,11 @@ Every auto category and what its proof is, so no auto rule rests on a name or an
 - `test-artefacts` (`test-output`) and the auto rules of `packs/python.toml` (`pycache`, `pytest-cache`, `mypy-cache`,
   `ruff-cache`, `hypothesis`): kind `project`, proved by `guard.ProjectArtifact` (a project marker next to it, inside a
   git work tree that is not a linked worktree, git-ignored, no tracked file, no nested repository). Checked, no change.
+- A nested repository inside a project build artefact (for example a checkout a `build.rs` cloned into `target/`)
+  is allowed only when it is clean, has a remote and is fully pushed (no stash, no local commit on any branch or on
+  HEAD that no remote holds); a `.git` file, a bare repository, more than 16 nested repositories or a 20 s overrun
+  keep the artefact (`nested-git`). This runs `git` inside a repository sapulidi did not create, so it relies on the
+  hardened invocation and carries the same limit as the fsmonitor section below.
 - Optional categories are not auto: they need an explicit opt-in, and every one of them still passes S5.
 
 ## Uninstall `--all` checks
