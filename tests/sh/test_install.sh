@@ -8,6 +8,10 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 fails=0
 n=0
+# The pinned version comes from the launcher (the "pinned values" check compares install.sh with it), so the suite
+# also passes after scripts/release.sh bumped both. N1 is an arbitrary version above any pin.
+V=$(sed -n 's/^SAPULIDI_VERSION=//p' "$root/bin/sapulidi")
+N1=98.2.0
 
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 bad() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $1" >&2; }
@@ -47,7 +51,7 @@ new_env() {
 
 # publish <asset-suffix>: the fake binary goes to REL, the matching checksums.txt to RAW, a decoy to REL
 publish() {
-	local asset=sapulidi_0.1.0_$1
+	local asset=sapulidi_${V}_$1
 	cp "$fixture/sapulidi" "$REL/$asset"
 	printf '%s  %s\n' "$(sha "$REL/$asset")" "$asset" >"$RAW/checksums.txt"
 	printf '%s  %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$asset" >"$REL/checksums.txt"
@@ -59,30 +63,39 @@ run() { # runs install.sh with the private PATH
 
 rcsum() { cat "$H/.zshrc" "$H/.bashrc" | { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }; }
 nothing_left() {
-	[ ! -e "$T/data/bin/0.1.0" ] && [ ! -e "$T/data/bin/current" ] && [ ! -e "$H/.local/bin/sapulidi" ] &&
+	[ ! -e "$T/data/bin/$V" ] && [ ! -e "$T/data/bin/current" ] && [ ! -e "$H/.local/bin/sapulidi" ] &&
 		[ -z "$(ls -A "$T/data/bin" 2>/dev/null | grep -e '^\.install' -e '^\.lock$')" ]
 }
 
 command -v curl >/dev/null || { echo "skip: curl missing"; exit 0; }
 check "sh -n" sh -n "$root/install.sh"
 if command -v shellcheck >/dev/null; then check "shellcheck" shellcheck -s sh "$root/install.sh"; fi
-check "at most 175 lines" test "$(wc -l <"$root/install.sh" | tr -d ' ')" -le 175
-check "pinned values" grep -q '^SAPULIDI_VERSION=0.1.0$' "$root/install.sh"
+check "at most 180 lines" test "$(wc -l <"$root/install.sh" | tr -d ' ')" -le 180
+check "pinned values" test "$(sed -n 's/^SAPULIDI_VERSION=//p' "$root/install.sh")" = "$V" -a -n "$V"
+check "main is called on the last line" test "$(tail -n 1 "$root/install.sh")" = 'main "$@"'
+
+# a download cut off before the last line runs nothing and installs nothing
+new_env trunc
+publish linux_amd64
+sed '$d' "$root/install.sh" >"$S"
+out=$(run sh "$S" 2>&1); rc=$?
+check "truncated script installs nothing" nothing_left
+check "truncated script prints nothing" test -z "$out"
 
 # install, verify, link; rc files untouched
 new_env t1
 publish linux_amd64
 before=$(rcsum)
 out=$(run sh "$S" 2>&1); rc=$?
-check "installs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
-check "current symlink" test "$(readlink "$T/data/bin/current")" = 0.1.0
+check "installs" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
+check "current symlink" test "$(readlink "$T/data/bin/current")" = "$V"
 check "launcher-style link" test "$(readlink "$H/.local/bin/sapulidi")" = "$T/data/bin/current/sapulidi"
 check "linked binary runs" test "$("$H/.local/bin/sapulidi" a)" = "fake sapulidi a"
-check "prints where and version" grep -q "$T/data/bin/0.1.0/sapulidi" <<<"$out"
-check "prints version" grep -q '0\.1\.0' <<<"$out"
+check "prints where and version" grep -q "$T/data/bin/$V/sapulidi" <<<"$out"
+check "prints version" grep -q "(version ${V//./\\.})" <<<"$out"
 check "prints the PATH line" grep -q 'export PATH=.*\.local/bin' <<<"$out"
 check "no rc file touched" test "$(rcsum)" = "$before"
-check "no temp or lock left" test -z "$(ls -A "$T/data/bin" | grep -v -e '^0.1.0$' -e '^current$')" -a -z "$(ls -A "$T/data/bin/0.1.0" | grep -v '^sapulidi$')"
+check "no temp or lock left" test -z "$(ls -A "$T/data/bin" | grep -v -e "^${V//./\\.}\$" -e '^current$')" -a -z "$(ls -A "$T/data/bin/$V" | grep -v '^sapulidi$')"
 
 # second run: already installed, nothing downloaded
 rm -rf "$REL"/* "$RAW"/*
@@ -107,7 +120,7 @@ check "dry-run prints each step" test "$(grep -c -e download -e checksums.txt -e
 # checksum mismatch
 new_env t3
 publish linux_amd64
-echo tampered >>"$REL/sapulidi_0.1.0_linux_amd64"
+echo tampered >>"$REL/sapulidi_${V}_linux_amd64"
 out=$(run sh "$S" 2>&1); rc=$?
 check "mismatch exits 3" test "$rc" = 3
 check "mismatch message" grep -q 'checksum mismatch' <<<"$out"
@@ -133,7 +146,7 @@ check "no raw checksums installs nothing" nothing_left
 # download failure
 new_env t6
 publish linux_amd64
-rm "$REL/sapulidi_0.1.0_linux_amd64"
+rm "$REL/sapulidi_${V}_linux_amd64"
 out=$(run sh "$S" 2>&1); rc=$?
 check "failed download exits 3" test "$rc" = 3
 check "failed download installs nothing" nothing_left
@@ -167,7 +180,7 @@ rm -f "$P/curl"
 printf '#!/bin/sh\necho "$*" >>"%s/wget.log"\ncat "${5#file://}" >"$2"\n' "$T" >"$P/wget"
 chmod +x "$P/wget"
 out=$(run sh "$S" 2>&1); rc=$?
-check "wget-only installs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+check "wget-only installs" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
 check "wget never gets --https-only" test -s "$T/wget.log" -a -z "$(grep -e https-only "$T/wget.log")"
 
 # no sha tool
@@ -202,7 +215,7 @@ mkdir -p "$H/.local/bin"
 echo mine >"$H/.local/bin/sapulidi"
 out=$(run sh "$S" 2>&1); rc=$?
 check "foreign file refused" test "$rc" = 1 -a "$(cat "$H/.local/bin/sapulidi")" = mine
-check "foreign file: no binary installed" test ! -e "$T/data/bin/0.1.0"
+check "foreign file: no binary installed" test ! -e "$T/data/bin/$V"
 rm "$H/.local/bin/sapulidi"
 ln -s /nonexistent/elsewhere "$H/.local/bin/sapulidi"
 out=$(run sh "$S" 2>&1); rc=$?
@@ -228,7 +241,7 @@ publish linux_amd64
 out=$(run sh "$S" -- --bogus 2>&1); rc=$?
 check "unknown flag exits 2" test "$rc" = 2
 check "unknown flag is reported by the script" grep -q 'rejected these arguments' <<<"$out"
-check "unknown flag still installed" test -x "$T/data/bin/0.1.0/sapulidi"
+check "unknown flag still installed" test -x "$T/data/bin/$V/sapulidi"
 out=$(run sh "$S" -- ok 2>&1); rc=$?
 check "no rejection message when the binary exits 0" test "$rc" = 0 -a -z "$(grep 'rejected these' <<<"$out")"
 out=$(run sh "$S" --bogus 2>&1); rc=$?
@@ -250,17 +263,17 @@ check ".local/bin is not 0700" test "$(ls -ld "$H/.local" | cut -c1-10)" != drwx
 new_env t12c
 publish linux_amd64
 out=$(run sh -s -- --stdin <"$S" 2>&1); rc=$?
-check "sh -s < install.sh installs and runs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+check "sh -s < install.sh installs and runs" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
 check "binary gets no script on stdin" test "$(tail -n 1 <<<"$out")" = "stdin=[]"
 
 # checksum file shapes: CRLF ok, similar name ignored, conflicting duplicate refused, identical duplicate ok
 new_env t12d
 publish linux_amd64
-a=sapulidi_0.1.0_linux_amd64
+a=sapulidi_${V}_linux_amd64
 good=$(sha "$REL/$a")
 printf '%s  %s.sig\r\n%s  %s\r\n' 0000000000000000000000000000000000000000000000000000000000000000 "$a" "$good" "$a" >"$RAW/checksums.txt"
 out=$(run sh "$S" 2>&1); rc=$?
-check "CRLF checksums and a .sig line still install" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+check "CRLF checksums and a .sig line still install" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
 new_env t12e
 publish linux_amd64
 printf '%s  %s\n%s  %s\n' 0000000000000000000000000000000000000000000000000000000000000000 "$a" "$good" "$a" >"$RAW/checksums.txt"
@@ -271,23 +284,23 @@ new_env t12f
 publish linux_amd64
 printf '%s  %s\n%s  %s\n' "$good" "$a" "$good" "$a" >"$RAW/checksums.txt"
 out=$(run sh "$S" 2>&1); rc=$?
-check "identical duplicate line installs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+check "identical duplicate line installs" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
 
 # bin/current moves forward only
 new_env t13
 publish linux_amd64
-mkdir -p "$T/data/bin/0.2.0"
-cp "$fixture/sapulidi" "$T/data/bin/0.2.0/sapulidi"; chmod +x "$T/data/bin/0.2.0/sapulidi"
+mkdir -p "$T/data/bin/$N1"
+cp "$fixture/sapulidi" "$T/data/bin/$N1/sapulidi"; chmod +x "$T/data/bin/$N1/sapulidi"
 run sh "$S" >/dev/null 2>&1
-check "current is not moved back" test "$(readlink "$T/data/bin/current")" = 0.2.0
+check "current is not moved back" test "$(readlink "$T/data/bin/current")" = "$N1"
 out=$(run sh "$S" 2>&1)
-check "says which version will run" grep -q 'newer than 0.1.0; 0.2.0 will run' <<<"$out"
+check "says which version will run" grep -q "newer than $V; $N1 will run" <<<"$out"
 
 # a non-executable current binary is refused
 new_env t13b
 publish linux_amd64
-mkdir -p "$T/data/bin/0.2.0"
-cp "$fixture/sapulidi" "$T/data/bin/0.2.0/sapulidi"; chmod 0644 "$T/data/bin/0.2.0/sapulidi"
+mkdir -p "$T/data/bin/$N1"
+cp "$fixture/sapulidi" "$T/data/bin/$N1/sapulidi"; chmod 0644 "$T/data/bin/$N1/sapulidi"
 out=$(run sh "$S" 2>&1); rc=$?
 check "non-executable current exits 3" test "$rc" = 3
 check "non-executable current message" grep -q 'not an executable file' <<<"$out"
@@ -296,7 +309,7 @@ check "non-executable current message" grep -q 'not an executable file' <<<"$out
 new_env t14 Darwin arm64
 publish darwin_arm64
 out=$(run sh "$S" 2>&1); rc=$?
-check "darwin arm64 installs" test "$rc" = 0 -a -x "$T/data/bin/0.1.0/sapulidi"
+check "darwin arm64 installs" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
 
 echo "$n checks, $fails failed"
 [ "$fails" = 0 ]

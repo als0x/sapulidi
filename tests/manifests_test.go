@@ -101,6 +101,15 @@ func TestReleaseScriptBumpsEveryPin(t *testing.T) {
 	if sum < 0 || suite < sum {
 		t.Error("release.sh must write checksums.txt before it runs tests/run.sh")
 	}
+	// The binary embeds the launcher and the manifests, so every bump comes before the first build.
+	bump := strings.Index(text, "replace bin/sapulidi")
+	build := strings.Index(text, `gobuild "${t%/*}"`)
+	if bump < 0 || build < 0 || bump > build {
+		t.Error("release.sh must bump bin/sapulidi, install.sh and the manifests before the gobuild loop")
+	}
+	if i := strings.LastIndex(text, `replace "$f"`); i < 0 || i > build {
+		t.Error("release.sh must bump the manifests before the gobuild loop")
+	}
 }
 
 func TestReadmeCoversInstallAndTUI(t *testing.T) {
