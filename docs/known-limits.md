@@ -77,9 +77,14 @@ Every auto category and what its proof is, so no auto rule rests on a name or an
   git work tree that is not a linked worktree, git-ignored, no tracked file, no nested repository). Checked, no change.
 - A nested repository inside a project build artefact (for example a checkout a `build.rs` cloned into `target/`)
   is allowed only when it is clean, has a remote and is fully pushed (no stash, no local commit on any branch or on
-  HEAD that no remote holds); a `.git` file, a bare repository, more than 16 nested repositories or a 20 s overrun
-  keep the artefact (`nested-git`). This runs `git` inside a repository sapulidi did not create, so it relies on the
-  hardened invocation and carries the same limit as the fsmonitor section below.
+  HEAD or tag that no remote holds, and every remote a network url); a `.git` file, a bare repository, alternates,
+  replace refs, linked worktrees, a repository on another filesystem, more than 16 nested repositories or a 20 s
+  overrun keep the artefact (`nested-git`). This runs `git` inside a repository sapulidi did not create. A filter
+  driver defined in the repository's own config runs on every stat-dirty file during `git status` and the three `-c`
+  overrides do not stop it, so the proof first reads `.git/config` as a file (allow-list of plain clone settings) and
+  starts no git when anything else is in it; the remaining exposure is the one in the fsmonitor section below. Ignored
+  files are not listed by `git status`: a credential-looking one is caught by the secret guard, but any other ignored
+  local file inside a nested repository is lost with the artefact.
 - Optional categories are not auto: they need an explicit opt-in, and every one of them still passes S5.
 
 ## Uninstall `--all` checks

@@ -1,11 +1,14 @@
 package guard
 
 import (
+	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/execx"
@@ -28,6 +31,8 @@ func nestedClone(t *testing.T, dir, rel string) string {
 		t.Fatal(err)
 	}
 	git(t, dir, "clone", "-q", "-b", "main", remote, clone)
+	// A local path as a remote proves nothing, so the clone names a network url; its remote-tracking refs stay.
+	git(t, clone, "config", "remote.origin.url", "https://example.invalid/r.git")
 	return clone
 }
 
@@ -120,7 +125,7 @@ func TestNestedProofRunsNoFsmonitor(t *testing.T) {
 	_, dir := projectRepo(t)
 	clone := nestedClone(t, dir, "out/src")
 	marker := trapFsmonitor(t, clone, clone)
-	wantWhy(t, ProjectArtifact(execx.Real{}, dir, markers), "")
+	wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), "config")
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("the nested proof ran the nested repository's core.fsmonitor command")
 	}
@@ -132,4 +137,189 @@ func TestNestedGainingWorkBetweenScanAndProofKeeps(t *testing.T) {
 	wantWhy(t, ProjectArtifact(execx.Real{}, dir, markers), "")
 	write(t, filepath.Join(clone, "a.txt"), "edited after the scan\n")
 	wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), "dirty")
+}
+
+func TestNestedKeepsWhatOnlyFilesRevealAndWhatGitMisses(t *testing.T) {
+	cases := []struct {
+		name, reason string
+		mutate       func(t *testing.T, clone string)
+	}{
+		{"tag-only commit", "unpushed", func(t *testing.T, c string) {
+			write(t, filepath.Join(c, "b.txt"), "b\n")
+			git(t, c, "add", "b.txt")
+			nestedCommit(t, c, "tagged")
+			git(t, c, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "tag", "-a", "v1", "-m", "x")
+			git(t, c, "reset", "-q", "--hard", "origin/main")
+		}},
+		{"linked worktree outside", "worktrees", func(t *testing.T, c string) {
+			git(t, c, "worktree", "add", "-q", "-b", "feat", filepath.Join(realDir(t), "wt"))
+		}},
+		{"file url remote", "local-remote", func(t *testing.T, c string) {
+			git(t, c, "config", "remote.origin.url", "file://"+filepath.Join(realDir(t), "r.git"))
+		}},
+		{"relative remote", "local-remote", func(t *testing.T, c string) {
+			git(t, c, "config", "remote.origin.url", "../remote.git")
+		}},
+		{"absolute remote", "local-remote", func(t *testing.T, c string) {
+			git(t, c, "config", "remote.origin.url", "/srv/remote.git")
+		}},
+		{"core.worktree", "config", func(t *testing.T, c string) { git(t, c, "config", "core.worktree", c) }},
+		{"alternates", "alternates", func(t *testing.T, c string) {
+			write(t, filepath.Join(c, ".git", "objects", "info", "alternates"), "/elsewhere/objects\n")
+		}},
+		{"replace ref", "replace", func(t *testing.T, c string) {
+			write(t, filepath.Join(c, ".git", "refs", "replace", strings.Repeat("a", 40)), strings.Repeat("b", 40)+"\n")
+		}},
+		{"grafts", "replace", func(t *testing.T, c string) { write(t, filepath.Join(c, ".git", "info", "grafts"), "") }},
+		{"empty .git directory", "identity", func(t *testing.T, c string) {
+			if err := os.RemoveAll(c); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(c, ".git"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{".git with objects but no HEAD", "identity", func(t *testing.T, c string) {
+			if err := os.RemoveAll(c); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(c, ".git", "objects"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, dir := projectRepo(t)
+			clone := nestedClone(t, dir, "out/src")
+			tc.mutate(t, clone)
+			wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), tc.reason)
+		})
+	}
+}
+
+func TestNestedFilterDriverNeverRuns(t *testing.T) {
+	_, dir := projectRepo(t)
+	clone := nestedClone(t, dir, "out/src")
+	marker := filepath.Join(realDir(t), "filter-ran")
+	write(t, filepath.Join(clone, ".git", "info", "attributes"), "* filter=trap\n")
+	git(t, clone, "config", "filter.trap.clean", "touch '"+marker+"'; cat")
+	write(t, filepath.Join(clone, "a.txt"), "changed\n")
+	wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), "config")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a filter driver from the nested repository's config ran")
+	}
+}
+
+func TestNestedIgnoredSecretStillKeepsViaSecretGuard(t *testing.T) {
+	_, dir := projectRepo(t)
+	clone := nestedClone(t, dir, "out/src")
+	write(t, filepath.Join(clone, ".git", "info", "exclude"), ".env\n")
+	write(t, filepath.Join(clone, ".env"), "TOKEN=x\n")
+	wantWhy(t, ProjectArtifact(execx.Real{}, dir, markers), "")
+	wantWhy(t, Secret(dir), "secret")
+}
+
+func TestScanConfig(t *testing.T) {
+	plain := "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n[remote \"origin\"]\n\turl = https://h/r.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n"
+	cases := []struct{ name, body, reason string }{
+		{"plain clone", plain, ""},
+		{"filter section", plain + "[filter \"x\"]\n\tclean = c\n", "config"},
+		{"filter upper case", plain + "[FILTER \"x\"]\n\tCLEAN = c\n", "config"},
+		{"filter dotted", plain + "[filter.x]\n\tclean = c\n", "config"},
+		{"quoted section name", plain + "[\"filter\" \"x\"]\n\tclean = c\n", "config"},
+		{"include", plain + "[include]\n\tpath = /x\n", "config"},
+		{"includeIf", plain + "[includeIf \"gitdir:/\"]\n\tpath = /x\n", "config"},
+		{"attributesFile", plain + "[core]\n\tattributesFile = /x\n", "config"},
+		{"fsmonitor", plain + "[core]\n\tfsmonitor = /x\n", "config"},
+		{"hooksPath", plain + "[core]\n\tHOOKSPATH = /x\n", "config"},
+		{"sshCommand", plain + "[core]\n\tsshCommand = x\n", "config"},
+		{"gitProxy", plain + "[core]\n\tgitProxy = x\n", "config"},
+		{"packObjectsHook", plain + "[uploadpack]\n\tpackObjectsHook = x\n", "config"},
+		{"key on the header line", "[core] fsmonitor = x\n", "config"},
+		{"continuation hides a key", "[core]\n\tfilemode = true \\\n\tfsmonitor = x\n[core]\n\tfsmonitor = y\n", "config"},
+		{"unterminated header", "[core\n", "config"},
+		{"key before any section", "filemode = true\n", "config"},
+		{"url with a quote", "[remote \"o\"]\n\turl = \"x\"\n", "config"},
+		{"bare", "[core]\n\tbare = true\n", "bare"},
+		{"no config file at all", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := filepath.Join(realDir(t), "config")
+			write(t, p, tc.body)
+			if _, got := scanConfig(p); got != tc.reason {
+				t.Fatalf("reason = %q, want %q", got, tc.reason)
+			}
+		})
+	}
+	if _, got := scanConfig(filepath.Join(realDir(t), "missing")); got != "" {
+		t.Fatalf("missing file: %q", got)
+	}
+	big := filepath.Join(realDir(t), "big")
+	write(t, big, "# "+strings.Repeat("x", maxRead)+"\n")
+	if _, got := scanConfig(big); got != "config" {
+		t.Fatalf("oversized config: %q", got)
+	}
+}
+
+func TestNetworkURL(t *testing.T) {
+	for u, want := range map[string]bool{
+		"https://h/r.git": true, "ssh://git@h/r.git": true, "git@github.com:o/r.git": true, "git://h/r": true,
+		"file:///x": false, "FILE:///x": false, "file:/x": false, "/abs/r.git": false, "../r.git": false,
+		"r.git": false, "ext::sh -c x": false, "": false, "ftp://h/r": false,
+	} {
+		if got := networkURL(u); got != want {
+			t.Errorf("networkURL(%q) = %v, want %v", u, got, want)
+		}
+	}
+}
+
+func TestNestedOtherFilesystemIsKept(t *testing.T) {
+	_, dir := projectRepo(t)
+	nestedClone(t, dir, "out/src")
+	write(t, filepath.Join(dir, "mnt", "f"), "x")
+	orig := statDev
+	t.Cleanup(func() { statDev = orig })
+	statDev = func(fi fs.FileInfo) (uint64, bool) {
+		dev, ok := orig(fi)
+		if fi.Name() == "mnt" {
+			dev++
+		}
+		return dev, ok
+	}
+	wantNested(t, ProjectArtifact(execx.Real{}, dir, markers), "other-filesystem")
+}
+
+// blockRunner answers only when its context ends; out, when set, is returned at once instead.
+type blockRunner struct{ out []byte }
+
+func (r blockRunner) Run(ctx context.Context, dir string, argv ...string) ([]byte, error) {
+	if r.out != nil {
+		return r.out, nil
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (blockRunner) LookPath(string) (string, error) { return "", os.ErrNotExist }
+
+func TestNestedBudgetBoundsTheWholeProof(t *testing.T) {
+	_, dir := projectRepo(t)
+	nestedClone(t, dir, "out/src")
+	orig := NestedBudget
+	t.Cleanup(func() { NestedBudget = orig })
+	NestedBudget = 100 * time.Millisecond
+	start := time.Now()
+	err := nestedProof(blockRunner{}, dir)
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("the proof took %v with a 100ms budget", took)
+	}
+	wantWhy(t, err, "nested-git")
+}
+
+func TestNestedGitOutputIsCapped(t *testing.T) {
+	_, dir := projectRepo(t)
+	nestedClone(t, dir, "out/src")
+	wantNested(t, nestedProof(blockRunner{out: make([]byte, maxRead+1)}, dir), "error")
 }
