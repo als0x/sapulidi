@@ -83,6 +83,184 @@ func pathsOf(rows []Row) []string {
 	return out
 }
 
+// fx4Rows has every kind of row the default view must sort out.
+func fx4Rows() []Row {
+	return []Row{
+		{Path: "/a/auto", Bytes: 100_000_000, Source: SrcAuto, Category: "go", RuleKey: "go/a@1"},
+		{Path: "/a/opt-on", Bytes: 90_000_000, Source: SrcOptionalOn, Category: "node", RuleKey: "node/a@1"},
+		{Path: "/a/opt-off", Bytes: 50_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/a@1"},
+		{Path: "/a/opt-off-unknown", Bytes: -1, Source: SrcOptionalOff, Category: "node", RuleKey: "node/a@1"},
+		{Path: "/a/excluded", Bytes: 80_000_000, Source: SrcExcluded, Base: SrcAuto, Category: "go", RuleKey: "go/a@1"},
+		{Path: "/a/kept-dirty", Bytes: -1, Source: SrcKept, Guard: "dirty", Category: "git", RuleKey: "git/w@1"},
+		{Path: "/a/kept-odd", Bytes: -1, Source: SrcKept, Guard: "some-odd-guard-token-name", Category: "git", RuleKey: "git/w@1"},
+	}
+}
+
+func fx4Model(rows []Row) Model {
+	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
+	return m
+}
+
+func screen(m Model) string { return strings.Join(View(m, 100, 30), "\n") }
+
+func TestDefaultViewHoldsCandidatesAndExcludedOnly(t *testing.T) {
+	m := fx4Model(fx4Rows())
+	want := []string{"/a/auto", "/a/opt-on", "/a/excluded"}
+	if got := pathsOf(m.visible()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("default view = %v, want %v", got, want)
+	}
+	g, _ := keys(m, "g")
+	if got := pathsOf(g.visible()); len(got) != 5 || got[3] != "/a/kept-dirty" {
+		t.Fatalf("g view = %v", got)
+	}
+	for _, r := range g.visible() {
+		if r.Source == SrcKept && r.selectable() {
+			t.Fatalf("kept row %s is selectable", r.Path)
+		}
+	}
+	o, _ := keys(m, "o")
+	if got := pathsOf(o.visible()); len(got) != 5 || got[3] != "/a/opt-off" {
+		t.Fatalf("o view = %v", got)
+	}
+	both, _ := keys(m, "og")
+	if len(both.visible()) != 7 {
+		t.Fatalf("o and g view = %v", pathsOf(both.visible()))
+	}
+	back, _ := keys(both, "g")
+	if len(back.visible()) != 5 {
+		t.Fatalf("second g must hide kept rows: %v", pathsOf(back.visible()))
+	}
+}
+
+func TestJAndKStillMoveTheCursor(t *testing.T) {
+	m := fx4Model(fx4Rows())
+	m, _ = keys(m, "jj")
+	if m.Cursor != 2 {
+		t.Fatalf("j: cursor %d", m.Cursor)
+	}
+	if m, _ = keys(m, "k"); m.Cursor != 1 || m.ShowKept {
+		t.Fatalf("k must move up and not toggle kept: cursor %d, kept %v", m.Cursor, m.ShowKept)
+	}
+}
+
+func TestExcludedRowVisibleAndUnexcludeUnchanged(t *testing.T) {
+	m := fx4Model(fx4Rows())
+	for i, r := range m.visible() {
+		if r.Path == "/a/excluded" {
+			m.Cursor = i
+		}
+	}
+	_, eff := keys(m, "x")
+	if !reflect.DeepEqual(eff, []Effect{RemoveExclusion{Path: "/a/excluded"}}) {
+		t.Fatalf("x on an excluded row: %v", eff)
+	}
+	m, _ = Update(m, ExclusionChangedMsg{Path: "/a/excluded", Excluded: false})
+	for _, r := range m.Rows {
+		if r.Path == "/a/excluded" && r.Source != SrcAuto {
+			t.Fatalf("un-excluded row did not return to auto: %v", r.Source)
+		}
+	}
+}
+
+func TestSearchFindsKeptRowsOnlyWhileGIsOn(t *testing.T) {
+	m := fx4Model(fx4Rows())
+	if got, _ := keys(m, "/kept<enter>"); len(got.visible()) != 0 {
+		t.Fatalf("kept rows found with g off: %v", pathsOf(got.visible()))
+	}
+	if got, _ := keys(m, "g/kept<enter>"); len(got.visible()) != 2 {
+		t.Fatalf("kept rows not found with g on: %v", pathsOf(got.visible()))
+	}
+}
+
+func TestHiddenHintLines(t *testing.T) {
+	s := screen(fx4Model(fx4Rows()))
+	for _, want := range []string{"optional (off): 2 | " + fmtBytes(50_000_000) + "+ | o", "kept: 2 | g"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("summary lacks %q:\n%s", want, s)
+		}
+	}
+	if s := strings.Join(View(fx4Model(fx4Rows()), 80, 24), "\n"); !strings.Contains(s, "optional (off): 2 | "+fmtBytes(50_000_000)+"+ | o  ") || !strings.Contains(s, "kept: 2 | g  ") {
+		t.Fatalf("hint lines are cut at 80 columns:\n%s", s)
+	}
+	known := fx4Rows()
+	known[3].Bytes = 10_000_000
+	if s := screen(fx4Model(known)); !strings.Contains(s, "optional (off): 2 | "+fmtBytes(60_000_000)+" | o") {
+		t.Fatalf("known sizes:\n%s", s)
+	}
+	m, _ := keys(fx4Model(fx4Rows()), "og")
+	if s := screen(m); strings.Contains(s, "optional (off)") || strings.Contains(s, "kept: ") {
+		t.Fatalf("nothing is hidden, no hint expected:\n%s", s)
+	}
+	if s := screen(fx4Model(fx4Rows()[:1])); strings.Contains(s, "optional (off)") || strings.Contains(s, "kept: ") {
+		t.Fatalf("no hidden rows, no hint expected:\n%s", s)
+	}
+}
+
+func TestEmptyDefaultListSaysNothingIsReady(t *testing.T) {
+	r := fx4Rows()
+	s := screen(fx4Model([]Row{r[2], r[5]}))
+	for _, want := range []string{"nothing is ready to delete", "optional (off): 1 |", "kept: 1 | g"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("empty list lacks %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestKeptRowSaysWhy(t *testing.T) {
+	for _, tok := range []string{"young", "open", "process", "secret", "tracked", "not-ignored", "no-marker", "nested-git", "place",
+		"deny", "dirty", "untracked", "stash", "unpushed", "gitfail", "orphan", "active", "error", "budget", "in use"} {
+		r := Row{Path: "/k", Bytes: -1, Source: SrcKept, Guard: tok}
+		word := guardReason(tok)
+		if _, known := guardWords[tok]; !known || word == "" {
+			t.Fatalf("no plain words for %q", tok)
+		}
+		if got := sourceText(r, false); got != "kept · "+word || cols(got) > 16 {
+			t.Fatalf("source of %q = %q", tok, got)
+		}
+		if got := sourceText(r, true); got != "kept-"+word || cols(got) > 16 {
+			t.Fatalf("plain source of %q = %q", tok, got)
+		}
+		if guardMeaning(tok) == "" {
+			t.Fatalf("no meaning for %q", tok)
+		}
+		m := fx4Model([]Row{r})
+		m, _ = keys(m, "g<enter>")
+		if s := screen(m); !strings.Contains(s, "kept-"+word) || !strings.Contains(s, guardMeaning(tok)) {
+			t.Fatalf("detail of %q:\n%s", tok, s)
+		}
+	}
+	odd := Row{Path: "/k", Source: SrcKept, Guard: "some-odd-guard-token-name"}
+	if got := sourceText(odd, true); !strings.HasPrefix(got, "kept-some") || cols(got) > 16 {
+		t.Fatalf("unknown token source = %q", got)
+	}
+	if guardMeaning("some-odd-guard-token-name") == "" || sourceText(Row{Source: SrcKept}, true) != "kept" {
+		t.Fatal("unknown or missing token must not panic or go empty")
+	}
+	m, _ := keys(fx4Model(fx4Rows()), "g")
+	if s := screen(m); !strings.Contains(s, "kept-dirty") || !strings.Contains(s, "? /a/kept-dirty") {
+		t.Fatalf("kept rows in the g view:\n%s", s)
+	}
+}
+
+func TestCursorStartsOnFirstSelectableRow(t *testing.T) {
+	rows := []Row{
+		{Path: "/a/excluded", Bytes: 900, Source: SrcExcluded, Base: SrcAuto},
+		{Path: "/a/blocked", Bytes: 800, Source: SrcAuto, Block: "cleaned by x"},
+		{Path: "/a/auto", Bytes: 100, Source: SrcAuto},
+	}
+	m := fx4Model(rows)
+	if r, _ := m.cursorRow(); r.Path != "/a/auto" {
+		t.Fatalf("cursor on %q", r.Path)
+	}
+}
+
+func TestSelectedCountRefersToTheDefaultList(t *testing.T) {
+	m, _ := keys(fx4Model(fx4Rows()), "a")
+	if s := screen(m); !strings.Contains(s, "2 of 2 selected") {
+		t.Fatalf("counts:\n%s", s)
+	}
+}
+
 func TestInitStartsScanAndEscCancels(t *testing.T) {
 	if got := Init(); !reflect.DeepEqual(got, []Effect{StartScan{}}) {
 		t.Fatalf("Init = %v", got)
@@ -293,7 +471,7 @@ func TestFilter(t *testing.T) {
 		t.Fatal("enter must end editing")
 	}
 	m, _ = keys(m, "<esc>")
-	if m.Filter != "" || len(m.visible()) != 8 {
+	if m.Filter != "" || len(m.visible()) != 7 {
 		t.Fatalf("esc did not clear the filter: %q %d", m.Filter, len(m.visible()))
 	}
 	m, _ = keys(m, "/excluded")

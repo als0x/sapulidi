@@ -23,7 +23,6 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		m.Summary = msg.Summary
 		m.Screen = ScreenList
 		m.Confirm = nil
-		m.Cursor = 0
 		sel := map[string]bool{}
 		for _, r := range m.Rows {
 			if m.Selected[r.Path] && r.selectable() {
@@ -31,6 +30,13 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 			}
 		}
 		m.Selected = sel
+		m.Cursor = 0 // the first selectable row, so the list opens on something that can be deleted
+		for i, r := range m.visible() {
+			if r.selectable() {
+				m.Cursor = i
+				break
+			}
+		}
 		return m, nil
 	case DeleteDoneMsg:
 		return deleteDone(m, msg.Result), nil
@@ -191,6 +197,9 @@ func listKey(m Model, k KeyMsg) (Model, []Effect) {
 		m.Sort = (m.Sort + 1) % 4
 	case k.Rune == 'o':
 		m = toggleOptional(m)
+	case k.Rune == 'g':
+		m.ShowKept = !m.ShowKept
+		m.Cursor = clampCursor(m, m.Cursor)
 	default:
 		return rowAction(m, k)
 	}

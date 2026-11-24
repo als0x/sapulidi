@@ -91,6 +91,13 @@ func TestUnexcludedSingleOptionalOffCandidateStaysDim(t *testing.T) {
 	unexcluded(t, engine.Summary{Kept: []core.Kept{{Category: "node", RuleKey: "node/nm@1", Path: "/h/p/node_modules", Why: "excluded"}}})
 }
 
+func TestRowsOfKeepsTheGuardToken(t *testing.T) {
+	rows := rowsOf(engine.Summary{Kept: []core.Kept{{Category: "git", RuleKey: "git/w@1", Path: "/h/w", Why: "dirty"}}})
+	if len(rows) != 1 || rows[0].Source != SrcKept || rows[0].Guard != "dirty" || rows[0].selectable() {
+		t.Fatalf("kept row = %+v", rows)
+	}
+}
+
 func TestIsWholesale(t *testing.T) {
 	for cmd, want := range map[string]bool{
 		"go clean -cache": true, "brew cleanup": true, "rustup toolchain uninstall 1.60": false,

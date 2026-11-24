@@ -43,6 +43,16 @@ func resultModel() Model {
 	return m
 }
 
+// emptyModel has nothing ready to delete, one optional row off and one kept row.
+func emptyModel() Model {
+	rows := []Row{
+		{Path: "/home/user/old/node_modules", Bytes: 800_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/node-modules@1"},
+		{Path: "/home/user/work/repo/.venv", Bytes: -1, Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1"},
+	}
+	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
+	return m
+}
+
 func script(s string) func() Model {
 	return func() Model { m, _ := keys(listModel(), s); return m }
 }
@@ -74,7 +84,17 @@ var goldenCases = []struct {
 	{"confirm", script("oad")},
 	{"result", resultModel},
 	{"excluded_row", cursorOn("/home/user/proj2/target")},
-	{"kept_row", cursorOn("/home/user/work/repo/.venv")},
+	{"kept_row", func() Model {
+		m, _ := keys(listModel(), "g")
+		for i, r := range m.visible() {
+			if r.Path == "/home/user/work/repo/.venv" {
+				m.Cursor = i
+			}
+		}
+		return m
+	}},
+	{"list_guarded", script("g")},
+	{"list_empty", emptyModel},
 	{"wholesale_row", cursorOn("/home/user/.npm/_cacache")},
 	{"paused", pausedModel},
 }

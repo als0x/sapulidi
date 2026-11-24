@@ -45,8 +45,9 @@ the scheduled run (`--schedule off` removes it, `--schedule` alone shows it), fo
 Run `sapulidi` with no arguments in a terminal. It scans, lists what it found by category and size, and lets you
 pick what to delete; every deletion still goes through the engine and its safety checks. Keys: `up`/`down` move,
 `enter` detail, `space` select, `a` select all, `d` delete the selection, `x` exclude, `o` show optional
-categories, `/` search, `s` sort, `esc` back, `q` quit. It is for a person in a terminal; an agent uses `plan`
-and `report`.
+categories, `g` show the rows kept by a guard (guarded, with the reason), `/` search, `s` sort, `esc` back, `q` quit. The
+screen opens on what is ready to delete; the summary says how many optional and kept rows are hidden. It is for a
+person in a terminal; an agent uses `plan` and `report`.
 
 ## Exclusions
 

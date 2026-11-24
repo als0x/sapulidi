@@ -143,6 +143,7 @@ type Model struct {
 	Selected     map[string]bool
 	Cursor       int // index into the visible rows
 	ShowOptional bool
+	ShowKept     bool // `g`: rows kept by a guard are listed (dim, never selectable)
 	Sort         SortKey
 	Filter       string
 	Filtering    bool
