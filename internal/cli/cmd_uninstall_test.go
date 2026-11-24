@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/als0x/sapulidi"
 	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/confirm"
+	"github.com/als0x/sapulidi/internal/install"
 	"github.com/als0x/sapulidi/internal/schedule"
 	"github.com/als0x/sapulidi/internal/testutil"
 )
@@ -103,6 +105,112 @@ func TestUninstallAllNeedsTerminal(t *testing.T) {
 	}
 	if err := json.Unmarshal(out.Bytes(), &doc); err != nil || len(doc.Schedule) != 2 || len(doc.Removed) == 0 {
 		t.Fatalf("%v %s", err, out.String())
+	}
+}
+
+// fakeClaudeCLI puts a recording `claude` on PATH. list is what `plugin list --json` prints; a call whose
+// arguments start with failPrefix exits 1. It returns the log path.
+func fakeClaudeCLI(t *testing.T, list, failPrefix string) string {
+	t.Helper()
+	dir, state := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(state, "list.json"), []byte(list), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nd='" + state + "'\necho \"$@\" >> \"$d/log\"\n" +
+		"case \"$*\" in '" + failPrefix + "'*) [ -n '" + failPrefix + "' ] && { echo boom >&2; exit 1; };; esac\n" +
+		"[ \"$*\" = 'plugin list --json' ] && cat \"$d/list.json\"\n" +
+		"[ \"$*\" = 'plugin marketplace list --json' ] && echo '[]'\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":/usr/bin:/bin")
+	return filepath.Join(state, "log")
+}
+
+const ownPlugins = `[{"name":"sapulidi","marketplace":"als0x-sapulidi","version":"0.0.1"},{"name":"mine","marketplace":"theirs","version":"1"}]`
+
+func readLines(t *testing.T, p string) string {
+	t.Helper()
+	b, _ := os.ReadFile(p)
+	return string(b)
+}
+
+// agentsInstalled has sapulidi install its Claude Code plugin into the fixture's data folder.
+func agentsInstalled(t *testing.T, p config.Paths) {
+	t.Helper()
+	fakeClaudeCLI(t, "[]", "")
+	home, _ := os.UserHomeDir()
+	env := &install.Env{Home: home, Data: p.Data, Plugin: sapulidi.Plugin}
+	if r, err := env.Install("claude"); err != nil || r[0].Status != "installed" {
+		t.Fatalf("install: %+v %v", r, err)
+	}
+}
+
+func TestUninstallRemovesWhatAgentsInstalled(t *testing.T) {
+	be, p := uninstallFixture(t)
+	agentsInstalled(t, p)
+	logp := fakeClaudeCLI(t, ownPlugins, "")
+	var out, errb bytes.Buffer
+	if code := Main([]string{"uninstall"}, &out, &errb); code != 0 {
+		t.Fatalf("%d %s", code, errb.String())
+	}
+	log := readLines(t, logp)
+	if !strings.Contains(log, "plugin uninstall sapulidi@als0x-sapulidi") || !strings.Contains(log, "plugin marketplace remove als0x-sapulidi") {
+		t.Fatalf("claude saw %q", log)
+	}
+	if strings.Contains(log, "mine") {
+		t.Fatalf("touched a plugin that is not ours: %q", log)
+	}
+	if has(filepath.Join(p.Data, "plugin")) || has(filepath.Join(p.Data, "bin")) || len(be.installed) != 0 {
+		t.Fatal("plugin folder, binaries or schedule left")
+	}
+}
+
+func TestUninstallJSONIncludesAgents(t *testing.T) {
+	_, p := uninstallFixture(t)
+	agentsInstalled(t, p)
+	fakeClaudeCLI(t, ownPlugins, "")
+	var out, errb bytes.Buffer
+	if code := Main([]string{"--json", "uninstall"}, &out, &errb); code != 0 {
+		t.Fatalf("%d %s", code, errb.String())
+	}
+	var doc struct {
+		Agents []install.Result `json:"agents"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil || len(doc.Agents) != 1 || doc.Agents[0].Status != "removed" {
+		t.Fatalf("%v %s", err, out.String())
+	}
+}
+
+func TestUninstallKeepsDataWhenAgentsStepFails(t *testing.T) {
+	be, p := uninstallFixture(t)
+	agentsInstalled(t, p)
+	fakeClaudeCLI(t, ownPlugins, "plugin uninstall")
+	var out, errb bytes.Buffer
+	if code := Main([]string{"uninstall"}, &out, &errb); code != 1 {
+		t.Fatalf("code %d %s", code, errb.String())
+	}
+	if len(be.installed) != 0 {
+		t.Fatalf("schedule left: %v", be.installed)
+	}
+	if !has(filepath.Join(p.Data, "plugin")) || !has(filepath.Join(p.Data, "agents.json")) || !has(filepath.Join(p.Data, "bin", "0.1.0", "sapulidi")) {
+		t.Fatal("deleted <data> although an agents step failed")
+	}
+	if !strings.Contains(errb.String(), "sapulidi agents remove all") {
+		t.Fatalf("does not say what to run: %q", errb.String())
+	}
+}
+
+func TestUninstallKeepsDataWhenClaudeMissing(t *testing.T) {
+	be, p := uninstallFixture(t)
+	agentsInstalled(t, p)
+	t.Setenv("PATH", t.TempDir()+":/usr/bin:/bin")
+	var out, errb bytes.Buffer
+	if code := Main([]string{"uninstall"}, &out, &errb); code != 1 {
+		t.Fatalf("code %d %s", code, errb.String())
+	}
+	if len(be.installed) != 0 || !has(filepath.Join(p.Data, "plugin")) || !has(filepath.Join(p.Data, "bin", "0.1.0")) {
+		t.Fatal("schedule must go, <data> must stay")
 	}
 }
 

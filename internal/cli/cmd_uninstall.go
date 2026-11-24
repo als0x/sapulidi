@@ -5,9 +5,19 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/als0x/sapulidi"
 	"github.com/als0x/sapulidi/internal/confirm"
 	"github.com/als0x/sapulidi/internal/delivery"
+	"github.com/als0x/sapulidi/internal/install"
+	"github.com/als0x/sapulidi/internal/schedule"
 )
+
+func nonNilResults(r []install.Result) []install.Result {
+	if r == nil {
+		return []install.Result{}
+	}
+	return r
+}
 
 func init() {
 	Register(Command{Name: "uninstall", Summary: "remove the schedule and binaries; --all also config and state (needs a terminal)", Run: runUninstall})
@@ -44,9 +54,47 @@ func runUninstall(app *App, args []string) int {
 			return fail(app, "uninstall", err)
 		}
 	}
-	res, err := delivery.Uninstall(delivery.UninstallOptions{Paths: paths, Home: home, Backend: be, All: all})
+	// What `--agents` installed goes first: the registered plugin's hooks run <data>/plugin/bin/sapulidi.
+	env := &install.Env{Home: home, Data: paths.Data, Plugin: sapulidi.Plugin}
+	if !app.JSON {
+		env.Log = func(s string) { fmt.Fprintln(app.Stdout, s) }
+	}
+	agents, aerr := env.Remove("all")
+	agentsFailed := aerr != nil
+	for _, r := range agents {
+		if r.Failed() {
+			agentsFailed = true
+		}
+	}
+	var res delivery.UninstallResult
+	err = nil
+	if agentsFailed {
+		// Keep <data>: the record and the extracted folder let a rerun finish. The schedule still goes.
+		for _, j := range schedule.Jobs(paths) {
+			if rerr := be.Remove(j.Label); rerr != nil {
+				err = fmt.Errorf("schedule remove %s: %w", j.Label, rerr)
+				break
+			}
+			res.Schedule = append(res.Schedule, j.Label)
+		}
+		msg := "removing what agents installed failed, so nothing else was removed; fix that, then run: sapulidi agents remove all, and sapulidi uninstall again"
+		if aerr != nil {
+			msg += " (" + aerr.Error() + ")"
+		}
+		for _, r := range agents {
+			for _, n := range r.Notes {
+				msg += "; " + n
+			}
+		}
+		if err != nil {
+			msg += "; " + err.Error()
+		}
+		err = errors.New(msg)
+	} else {
+		res, err = delivery.Uninstall(delivery.UninstallOptions{Paths: paths, Home: home, Backend: be, All: all})
+	}
 	if app.JSON {
-		doc := map[string]any{"schedule": nonNil(res.Schedule), "removed": nonNil(res.Removed)}
+		doc := map[string]any{"schedule": nonNil(res.Schedule), "removed": nonNil(res.Removed), "agents": nonNilResults(agents)}
 		if err != nil {
 			doc["error"] = fmt.Sprintf("sapulidi: uninstall: %v", err)
 		}
