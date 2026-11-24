@@ -86,36 +86,68 @@ func (r Row) reason() string {
 // row is always shown so that it can be un-excluded.
 func (m Model) hidden(r Row) bool {
 	switch {
-	case r.Source == SrcExcluded:
+	case r.Source == SrcExcluded, m.Pinned != "" && r.Path == m.Pinned:
 		return false
 	case r.Source == SrcKept:
-		return !m.ShowKept
+		return !m.ShowKept && r.Guard != guardRefresh
 	}
 	return r.origin() == SrcOptionalOff && !m.ShowOptional
 }
 
+// guardRefresh marks a row whose exclusion was removed but whose source the scan never gave: it stays visible, dim,
+// until the next scan.
+const guardRefresh = "refresh"
+
+// firstSelectable is the index of the first selectable visible row, 0 when there is none.
+func firstSelectable(m Model) int {
+	for i, r := range m.visible() {
+		if r.selectable() {
+			return i
+		}
+	}
+	return 0
+}
+
+// keepCursorOn puts the cursor on the row with path (when ok and still visible), else on the first selectable row.
+func (m Model) keepCursorOn(path string, ok bool) Model {
+	if ok {
+		for i, r := range m.visible() {
+			if r.Path == path {
+				m.Cursor = i
+				return m
+			}
+		}
+	}
+	m.Cursor = firstSelectable(m)
+	return m
+}
+
 // guardWords maps a guard token to the plain word shown after "kept" and to one sentence saying what it means.
 var guardWords = map[string][2]string{
-	"active":      {"active", "the tool or project is in use right now"},
-	"young":       {"young", "changed too recently to be safe to remove"},
-	"open":        {"in use", "a process has files open here"},
-	"in use":      {"in use", "a process has files open here"},
-	"process":     {"in use", "a running process uses it"},
-	"secret":      {"secret", "it may hold secrets or credentials"},
-	"tracked":     {"tracked", "its files are tracked by git"},
-	"not-ignored": {"unignored", "git does not ignore it, so it may be source"},
-	"no-marker":   {"no marker", "the marker file that proves what it is was not found"},
-	"nested-git":  {"nested", "it holds a git repository of its own"},
-	"place":       {"place", "it is not in a place the rule may clean"},
-	"deny":        {"denied", "it is on the deny list"},
-	"dirty":       {"dirty", "a git repository with uncommitted work"},
-	"untracked":   {"untracked", "a git repository with files git does not track yet"},
-	"stash":       {"stash", "a git repository with stashed work"},
-	"unpushed":    {"unpushed", "a git repository with commits that are not pushed"},
-	"gitfail":     {"git error", "git could not be asked, so it is left alone"},
-	"orphan":      {"orphan", "its owner could not be found, so it is left alone"},
-	"error":       {"error", "it could not be checked, so it is left alone"},
-	"budget":      {"budget", "the scan ran out of time before reaching it"},
+	"active":          {"active", "the tool or project is in use right now"},
+	"young":           {"young", "changed too recently to be safe to remove"},
+	"open":            {"in use", "a process has files open here"},
+	"in use":          {"in use", "a process has files open here"},
+	"process":         {"in use", "a running process uses it"},
+	"secret":          {"secret", "it may hold secrets or credentials"},
+	"tracked":         {"tracked", "its files are tracked by git"},
+	"not-ignored":     {"unignored", "git does not ignore it, so it may be source"},
+	"no-marker":       {"no marker", "the marker file that proves what it is was not found"},
+	"nested-git":      {"nested", "it holds a git repository of its own"},
+	"place":           {"place", "it is not in a place the rule may clean"},
+	"deny":            {"denied", "it is on the deny list"},
+	"dirty":           {"dirty", "a git repository with uncommitted work"},
+	"untracked":       {"untracked", "a git repository with files git does not track yet"},
+	"stash":           {"stash", "a git repository with stashed work"},
+	"unpushed":        {"unpushed", "a git repository with commits that are not pushed"},
+	"gitfail":         {"git error", "git could not be asked, so it is left alone"},
+	"orphan":          {"orphan", "its owner could not be found, so it is left alone"},
+	"error":           {"error", "it could not be checked, so it is left alone"},
+	"budget":          {"budget", "the scan ran out of time before reaching it"},
+	"locked":          {"locked", "another run holds the lock on it"},
+	"paused":          {"paused", "sapulidi is paused, so nothing is removed"},
+	"not-a-candidate": {"unlisted", "it is not in the plan, so it is left alone"},
+	guardRefresh:      {"refresh", "its exclusion was removed; run sapulidi again to refresh the list"},
 }
 
 // guardReason is the short word for a kept row; an unknown token is shown as is, shortened.
@@ -123,7 +155,11 @@ func guardReason(tok string) string {
 	if w, ok := guardWords[tok]; ok {
 		return w[0]
 	}
-	return shorten(clean(tok), 10)
+	tok = clean(tok)
+	if cols(tok) > 9 {
+		return cut(tok, 6) + "..."
+	}
+	return tok
 }
 
 // guardMeaning says in one sentence why a guard keeps a row.

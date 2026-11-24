@@ -30,13 +30,8 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 			}
 		}
 		m.Selected = sel
-		m.Cursor = 0 // the first selectable row, so the list opens on something that can be deleted
-		for i, r := range m.visible() {
-			if r.selectable() {
-				m.Cursor = i
-				break
-			}
-		}
+		m.Pinned = ""
+		m.Cursor = firstSelectable(m) // the list opens on something that can be deleted
 		return m, nil
 	case DeleteDoneMsg:
 		return deleteDone(m, msg.Result), nil
@@ -103,6 +98,7 @@ func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
 		m.Confirm = nil
 		m.Status = "an exclusion changed: confirm again"
 	}
+	cur, curOK := m.cursorRow()
 	m.Rows = slices.Clone(m.Rows)
 	for i, r := range m.Rows {
 		if r.Path != c.Path {
@@ -120,13 +116,21 @@ func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
 		} else if !c.Excluded && r.Source == SrcExcluded && r.Base == "" && r.Origin == "" {
 			// the scan gave this row no source: stay dim until a new scan does
 			m.Rows[i].Source = SrcKept
+			m.Rows[i].Guard = guardRefresh // stays visible, right where it is
 			m.Rows[i].Why = "exclusion removed; run sapulidi again to refresh the list"
 			m.Status = "exclusion removed: refresh the list by running sapulidi again"
 		} else if !c.Excluded && r.Source == SrcExcluded {
 			m.Rows[i].Source = r.origin()
 			m.Rows[i].Base = ""
 			m.Rows[i].Origin = ""
+			if m.hidden(m.Rows[i]) {
+				m.Pinned = r.Path // an optional-off row with `o` off: it stays until the cursor leaves it
+			}
 		}
+	}
+	m = m.keepCursorOn(cur.Path, curOK)
+	if _, ok := m.cursorRow(); !ok && m.Screen == ScreenDetail {
+		m.Screen = ScreenList
 	}
 	return m
 }
@@ -168,7 +172,20 @@ func updateKey(m Model, k KeyMsg) (Model, []Effect) {
 	return m, nil
 }
 
+// listKey handles a key of the list. A pinned row stays only while the cursor is on it: when the key moved the cursor
+// off it, the row is dropped from the view and the cursor stays on the row it moved to.
 func listKey(m Model, k KeyMsg) (Model, []Effect) {
+	m, eff := listKeyInner(m, k)
+	if m.Pinned != "" {
+		if r, ok := m.cursorRow(); ok && r.Path != m.Pinned {
+			m.Pinned = ""
+			m = m.keepCursorOn(r.Path, true)
+		}
+	}
+	return m, eff
+}
+
+func listKeyInner(m Model, k KeyMsg) (Model, []Effect) {
 	if m.Filtering {
 		return filterKey(m, k)
 	}
@@ -186,7 +203,7 @@ func listKey(m Model, k KeyMsg) (Model, []Effect) {
 		}
 	case k.Special == KeyEsc:
 		m.Filter = ""
-		m.Cursor = 0
+		m.Cursor = firstSelectable(m)
 	case k.Rune == 'q':
 		return m, []Effect{Quit{}}
 	case k.Rune == '/':
@@ -198,8 +215,9 @@ func listKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Rune == 'o':
 		m = toggleOptional(m)
 	case k.Rune == 'g':
+		cur, ok := m.cursorRow()
 		m.ShowKept = !m.ShowKept
-		m.Cursor = clampCursor(m, m.Cursor)
+		m = m.keepCursorOn(cur.Path, ok)
 	default:
 		return rowAction(m, k)
 	}
@@ -229,6 +247,9 @@ func rowAction(m Model, k KeyMsg) (Model, []Effect) {
 			return m, []Effect{RemoveExclusion{Path: r.Path}}
 		case r.Source == SrcKept:
 			m.Status = "kept by a guard: nothing to exclude"
+			if r.Guard == guardRefresh {
+				m.Status = "refresh the list by running sapulidi again"
+			}
 		case len(r.Members) > 0:
 			m.Status = "a group cannot be excluded as a whole"
 		default:
@@ -277,6 +298,7 @@ func selectAll(m Model) Model {
 }
 
 func toggleOptional(m Model) Model {
+	cur, curOK := m.cursorRow()
 	m.ShowOptional = !m.ShowOptional
 	if !m.ShowOptional {
 		m.Selected = cloneSel(m.Selected)
@@ -286,8 +308,7 @@ func toggleOptional(m Model) Model {
 			}
 		}
 	}
-	m.Cursor = clampCursor(m, m.Cursor)
-	return m
+	return m.keepCursorOn(cur.Path, curOK)
 }
 
 func filterKey(m Model, k KeyMsg) (Model, []Effect) {

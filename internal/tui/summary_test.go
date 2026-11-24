@@ -123,7 +123,8 @@ func TestUnexcludeRestoresOptionalOffFromScan(t *testing.T) {
 	if got := m.Rows[1].Source; got != SrcOptionalOff {
 		t.Fatalf("source = %q, want %q", got, SrcOptionalOff)
 	}
-	if len(m.visible()) != 0 {
-		t.Fatalf("optional-off rows show in the default list: %d", len(m.visible()))
+	// the un-excluded row stays in view (pinned) until the cursor leaves it; the other optional-off row stays hidden
+	if got := pathsOf(m.visible()); len(got) != 1 || got[0] != "/h/p/node_modules" {
+		t.Fatalf("visible = %v, want only the un-excluded row", got)
 	}
 }

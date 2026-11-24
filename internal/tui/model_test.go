@@ -26,7 +26,7 @@ func fixtureRows() []Row {
 		{Path: "/home/user/proj2/target", Bytes: 700_000_000, Created: day(2026, 1, 1), Updated: day(2026, 9, 9),
 			Source: SrcExcluded, Base: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
 		{Path: "/home/user/work/repo/.venv", Bytes: 90_000_000, Created: day(2026, 2, 2), Updated: day(2026, 11, 20),
-			Source: SrcKept, Category: "python", RuleKey: "python/venv@1", Block: "kept by a guard: git repository with uncommitted work"},
+			Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1", Block: "kept by a guard: git repository with uncommitted work"},
 		{Path: "/home/user/containers/stopped", Bytes: 60_000_000, Created: day(2026, 10, 1), Updated: day(2026, 10, 2),
 			Source: SrcOptionalOn, Category: "docker", RuleKey: "docker/stopped@1", Members: []string{"docker:abc123", "docker:def456"}},
 		{Path: "/home/user/a/very/long/directory/name/that/does/not/fit/in/the/path/column/of/the/list/target", Bytes: 20_000_000,
@@ -208,7 +208,7 @@ func TestEmptyDefaultListSaysNothingIsReady(t *testing.T) {
 
 func TestKeptRowSaysWhy(t *testing.T) {
 	for _, tok := range []string{"young", "open", "process", "secret", "tracked", "not-ignored", "no-marker", "nested-git", "place",
-		"deny", "dirty", "untracked", "stash", "unpushed", "gitfail", "orphan", "active", "error", "budget", "in use"} {
+		"deny", "dirty", "untracked", "stash", "unpushed", "gitfail", "orphan", "active", "error", "budget", "in use", "locked", "paused", "not-a-candidate", "refresh"} {
 		r := Row{Path: "/k", Bytes: -1, Source: SrcKept, Guard: tok}
 		word := guardReason(tok)
 		if _, known := guardWords[tok]; !known || word == "" {
@@ -230,7 +230,10 @@ func TestKeptRowSaysWhy(t *testing.T) {
 		}
 	}
 	odd := Row{Path: "/k", Source: SrcKept, Guard: "some-odd-guard-token-name"}
-	if got := sourceText(odd, true); !strings.HasPrefix(got, "kept-some") || cols(got) > 16 {
+	if got := sourceText(odd, true); !strings.HasPrefix(got, "kept-some") || !strings.HasSuffix(got, "...") || cols(got) > 16 {
+		t.Fatalf("unknown token source = %q", got)
+	}
+	if got := sourceText(odd, false); !strings.HasSuffix(got, "...") || cols(got) > 16 {
 		t.Fatalf("unknown token source = %q", got)
 	}
 	if guardMeaning("some-odd-guard-token-name") == "" || sourceText(Row{Source: SrcKept}, true) != "kept" {
@@ -239,6 +242,105 @@ func TestKeptRowSaysWhy(t *testing.T) {
 	m, _ := keys(fx4Model(fx4Rows()), "g")
 	if s := screen(m); !strings.Contains(s, "kept-dirty") || !strings.Contains(s, "? /a/kept-dirty") {
 		t.Fatalf("kept rows in the g view:\n%s", s)
+	}
+}
+
+func cursorPathOf(t *testing.T, m Model) string {
+	t.Helper()
+	r, ok := m.cursorRow()
+	if !ok {
+		t.Fatalf("cursor %d is outside the %d visible rows", m.Cursor, len(m.visible()))
+	}
+	return r.Path
+}
+
+func TestUnexcludeOfUnknownOriginStaysWhereItIs(t *testing.T) {
+	rows := []Row{
+		{Path: "/a", Bytes: 300, Source: SrcAuto},
+		{Path: "/x", Bytes: 250, Source: SrcExcluded}, // no Base, no Origin: the scan gave no source
+		{Path: "/b", Bytes: 200, Source: SrcAuto},
+		{Path: "/c", Bytes: 100, Source: SrcAuto},
+	}
+	m := fx4Model(rows)
+	m, _ = keys(m, "j") // /a is first selectable; /x is next
+	if cursorPathOf(t, m) != "/x" {
+		t.Fatalf("cursor on %q", cursorPathOf(t, m))
+	}
+	m, eff := keys(m, "x")
+	if !reflect.DeepEqual(eff, []Effect{RemoveExclusion{Path: "/x"}}) {
+		t.Fatalf("first x: %v", eff)
+	}
+	m, _ = Update(m, ExclusionChangedMsg{Path: "/x", Excluded: false})
+	if got := pathsOf(m.visible()); !reflect.DeepEqual(got, []string{"/a", "/x", "/b", "/c"}) || cursorPathOf(t, m) != "/x" {
+		t.Fatalf("row left the list or the cursor moved: %v cursor %d", got, m.Cursor)
+	}
+	m, eff = keys(m, "x")
+	if len(eff) != 0 || cursorPathOf(t, m) != "/x" || m.Status == "" {
+		t.Fatalf("second x must hit the same row and exclude nothing: %v %q on %q", eff, m.Status, cursorPathOf(t, m))
+	}
+	for _, r := range m.Rows {
+		if r.Source == SrcExcluded {
+			t.Fatalf("%s got excluded", r.Path)
+		}
+	}
+	d, _ := keys(m, "<enter>")
+	if s := screen(d); !strings.Contains(s, "kept-refresh") {
+		t.Fatalf("detail:\n%s", s)
+	}
+}
+
+func TestUnexcludeOfOptionalOffRowStaysUntilTheCursorLeaves(t *testing.T) {
+	rows := []Row{
+		{Path: "/a", Bytes: 300, Source: SrcAuto},
+		{Path: "/o", Bytes: 200, Source: SrcExcluded, Base: SrcOptionalOff},
+		{Path: "/b", Bytes: 100, Source: SrcAuto},
+	}
+	m := fx4Model(rows)
+	m, _ = keys(m, "j")
+	if cursorPathOf(t, m) != "/o" {
+		t.Fatalf("cursor on %q", cursorPathOf(t, m))
+	}
+	m, _ = Update(m, ExclusionChangedMsg{Path: "/o", Excluded: false})
+	if got := pathsOf(m.visible()); len(got) != 3 || cursorPathOf(t, m) != "/o" {
+		t.Fatalf("row left the list: %v cursor %d", got, m.Cursor)
+	}
+	if _, eff := keys(m, "x"); !reflect.DeepEqual(eff, []Effect{AddExclusion{Path: "/o"}}) {
+		t.Fatalf("x must hit the same row: %v", eff)
+	}
+	m, _ = keys(m, "j")
+	if got := pathsOf(m.visible()); !reflect.DeepEqual(got, []string{"/a", "/b"}) || cursorPathOf(t, m) != "/b" {
+		t.Fatalf("after leaving: %v on %q", got, cursorPathOf(t, m))
+	}
+}
+
+func TestTogglesAndEscKeepTheCursorOnTheSameRow(t *testing.T) {
+	rows := []Row{
+		{Path: "/b", Bytes: 20, Source: SrcAuto},
+		{Path: "/c", Bytes: 10, Source: SrcAuto},
+		{Path: "/a", Bytes: -1, Source: SrcKept, Guard: "dirty"},
+		{Path: "/a0", Bytes: 5, Source: SrcOptionalOff},
+	}
+	m := fx4Model(rows)
+	m, _ = keys(m, "sssj") // sort by path; cursor on /c
+	for _, key := range []string{"g", "g", "o", "o", "go", "og"} {
+		if got, _ := keys(m, key); cursorPathOf(t, got) != "/c" {
+			t.Fatalf("%q moved the cursor to %q", key, cursorPathOf(t, got))
+		}
+	}
+	m, _ = keys(m, "gk") // /b above /c, and /a above them
+	m, _ = keys(m, "<esc>")
+	if cursorPathOf(t, m) != "/b" {
+		t.Fatalf("esc: cursor on %q, want the first selectable row", cursorPathOf(t, m))
+	}
+}
+
+func TestOptionalHintIgnoresRowsThatStayBlocked(t *testing.T) {
+	rows := []Row{
+		{Path: "/a", Bytes: 1, Source: SrcAuto},
+		{Path: "docker prune", Bytes: 99, Source: SrcOptionalOff, Block: "never from this screen"},
+	}
+	if s := screen(fx4Model(rows)); strings.Contains(s, "optional (off)") {
+		t.Fatalf("hint counts a row that o cannot make selectable:\n%s", s)
 	}
 }
 

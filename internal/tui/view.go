@@ -134,6 +134,9 @@ func hiddenLines(m Model) []string {
 			keptN++
 			continue
 		}
+		if r.Block != "" {
+			continue // a wholesale row never becomes selectable, `o` does not help
+		}
 		optN++
 		if r.Bytes < 0 {
 			optUnknown++
