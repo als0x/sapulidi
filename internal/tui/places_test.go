@@ -98,15 +98,15 @@ func TestPlaceOf(t *testing.T) {
 
 func TestPlaceOfBases(t *testing.T) {
 	home := "/home/user"
-	roots := []string{"/tmp/claude-502/-proj-rooted"}
-	bases := []string{"/tmp/claude-502", "/tmp/claude-502/deep/", "/a/b", "/var/folders/xx/T", "", "rel/base", "/tmp/claude-502"}
+	roots := []string{"/tmp/claude-1000/-proj-rooted"}
+	bases := []string{"/tmp/claude-1000", "/tmp/claude-1000/deep/", "/a/b", "/var/folders/xx/T", "", "rel/base", "/tmp/claude-1000"}
 	for _, c := range []struct{ path, want string }{
-		{"/tmp/claude-502/-Users-x-proj/0a1b2c", "/tmp/claude-502/"},
-		{"/tmp/claude-502/-Users-y-other/3d4e5f", "/tmp/claude-502/"},
-		{"/tmp/claude-502/-proj-rooted/s1", "/tmp/claude-502/-proj-rooted/"}, // root beats base
-		{"/tmp/claude-502", "/tmp/"},                                         // the base itself: parent rule
-		{"/tmp/claude-502/deep/x/y", "/tmp/claude-502/deep/"},                // nested bases: longest wins
-		{"/a/bc/x", "/a/bc/"},                                                // /a/b is not a segment prefix of /a/bc
+		{"/tmp/claude-1000/-Users-x-proj/0a1b2c", "/tmp/claude-1000/"},
+		{"/tmp/claude-1000/-Users-y-other/3d4e5f", "/tmp/claude-1000/"},
+		{"/tmp/claude-1000/-proj-rooted/s1", "/tmp/claude-1000/-proj-rooted/"}, // root beats base
+		{"/tmp/claude-1000", "/tmp/"},                                          // the base itself: parent rule
+		{"/tmp/claude-1000/deep/x/y", "/tmp/claude-1000/deep/"},                // nested bases: longest wins
+		{"/a/bc/x", "/a/bc/"}, // /a/b is not a segment prefix of /a/bc
 		{"/a/b/x", "/a/b/"},
 		{"/var/folders/xx/T/go-build-1", "/var/folders/xx/T/"},
 		{"/var/folders/xx/T/go-build-1/a/b", "/var/folders/xx/T/"},
@@ -154,15 +154,15 @@ func TestWithResolvedAddsTheOtherSpelling(t *testing.T) {
 }
 
 func TestBothSpellingsOfABaseShareOnePlace(t *testing.T) {
-	bases := []string{"/tmp/claude-502", "/private/tmp/claude-502"}
-	a := placeOf("/private/tmp/claude-502/x/y", nil, bases, "/home/user")
-	b := placeOf("/tmp/claude-502/z/w", nil, bases, "/home/user")
-	if a != "/private/tmp/claude-502/" || b != "/tmp/claude-502/" {
+	bases := []string{"/tmp/claude-1000", "/private/tmp/claude-1000"}
+	a := placeOf("/private/tmp/claude-1000/x/y", nil, bases, "/home/user")
+	b := placeOf("/tmp/claude-1000/z/w", nil, bases, "/home/user")
+	if a != "/private/tmp/claude-1000/" || b != "/tmp/claude-1000/" {
 		t.Fatalf("places %q %q", a, b)
 	}
 	// a row spelled with the resolved form, base given only as /tmp plus its resolved form: one place per spelling,
-	// and the resolved row lands under the resolved base rather than /private/tmp/claude-502/x/
-	if got := placeOf("/private/tmp/claude-502/x/y", nil, bases[:1], "/home/user"); got != "/private/tmp/claude-502/x/" {
+	// and the resolved row lands under the resolved base rather than /private/tmp/claude-1000/x/
+	if got := placeOf("/private/tmp/claude-1000/x/y", nil, bases[:1], "/home/user"); got != "/private/tmp/claude-1000/x/" {
 		t.Fatalf("without the resolved form: %q", got)
 	}
 }
@@ -182,26 +182,26 @@ func TestSpaceOnAManyRowPlaceSaysSo(t *testing.T) {
 	}
 }
 
-const pScratch = "/private/tmp/claude-502/"
+const pScratch = "/private/tmp/claude-1000/"
 
 func scratchRows() []Row {
 	rows := placesRows()
 	for i := 0; i < 6; i++ {
 		rows = append(rows, Row{
-			Path:  fmt.Sprintf("/private/tmp/claude-502/-Users-x-proj%d/s%d", i, i),
+			Path:  fmt.Sprintf("/private/tmp/claude-1000/-Users-x-proj%d/s%d", i, i),
 			Bytes: -1, Updated: day(2026, 11, 10+i), Source: SrcKept, Guard: "active", Category: "agent", RuleKey: "agent/scratch@1",
 		})
 	}
 	rows = append(rows,
-		Row{Path: "/private/tmp/claude-502/-Users-x-old/s9", Bytes: 4_000_000, Updated: day(2026, 1, 2), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
-		Row{Path: "/private/tmp/claude-502/-Users-y-old/s8", Bytes: 1_000_000, Updated: day(2026, 1, 3), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
+		Row{Path: "/private/tmp/claude-1000/-Users-x-old/s9", Bytes: 4_000_000, Updated: day(2026, 1, 2), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
+		Row{Path: "/private/tmp/claude-1000/-Users-y-old/s8", Bytes: 1_000_000, Updated: day(2026, 1, 3), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
 	)
 	return rows
 }
 
 func scratchModel() Model {
 	s := placesSummary()
-	s.Bases = []string{"/private/tmp/claude-502"}
+	s.Bases = []string{"/private/tmp/claude-1000"}
 	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: scratchRows(), Summary: s})
 	return m
 }
