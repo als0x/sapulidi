@@ -118,17 +118,52 @@ var keyHelp = [][2]string{
 	{"/ : search", "s: sort"},
 	{"enter: detail", "space: select"},
 	{"x: exclude", "a: select all"},
-	{"o: optional", "q: quit"},
+	{"o: optional", "g: guarded"},
+	{"q: quit", ""},
+}
+
+// hiddenLines are the summary lines that say what the default list leaves out; none when nothing is hidden.
+func hiddenLines(m Model) []string {
+	var optN, keptN, optUnknown int
+	var optBytes int64
+	for _, r := range m.Rows {
+		if !m.hidden(r) {
+			continue
+		}
+		if r.Source == SrcKept {
+			keptN++
+			continue
+		}
+		if r.Block != "" {
+			continue // a wholesale row never becomes selectable, `o` does not help
+		}
+		optN++
+		if r.Bytes < 0 {
+			optUnknown++
+		} else {
+			optBytes += r.Bytes
+		}
+	}
+	var out []string
+	if optN > 0 {
+		size := fmtBytes(optBytes)
+		if optUnknown > 0 {
+			size += "+"
+		}
+		d := dot(m.Plain)
+		out = append(out, fmt.Sprintf("optional (off): %d %s %s %s o", optN, d, size, d))
+	}
+	if keptN > 0 {
+		out = append(out, fmt.Sprintf("kept: %d %s g", keptN, dot(m.Plain)))
+	}
+	return out
 }
 
 func summaryLines(m Model) []string {
-	var excluded, kept, selectable int
+	var excluded, selectable int
 	for _, r := range m.Rows {
-		switch r.Source {
-		case SrcExcluded:
+		if r.Source == SrcExcluded {
 			excluded++
-		case SrcKept:
-			kept++
 		}
 	}
 	for _, r := range m.visible() {
@@ -157,13 +192,14 @@ func summaryLines(m Model) []string {
 		}
 		disk = "disk free: " + fmtBytes(int64(m.Summary.FreeNow)) + " " + arrow(m.Plain) + " " + after
 	}
-	return []string{
+	lines := []string{
 		fmt.Sprintf("agents installed: %d", m.Summary.Agents),
 		fmt.Sprintf("to remove: %s, %d of %d selected", total, len(sel), selectable),
-		fmt.Sprintf("excluded: %d   kept by guards: %d", excluded, kept),
+		fmt.Sprintf("excluded: %d", excluded),
 		sched,
 		disk,
 	}
+	return append(lines, hiddenLines(m)...)
 }
 
 func viewList(m Model, w, h int) []string {
@@ -176,15 +212,22 @@ func viewList(m Model, w, h int) []string {
 	}
 	lines := sideBySide(left, panel(m.Plain, "keys", keys, rw), lw, rw)
 
-	pw := w - 47
-	head := " " + "    " + fitRight("size", 9) + " " + fit("path", pw) + " " + fit("age", 5) + " " + fit("updatedAt", 10) + " " + fit("source", 14)
+	pw := w - 49
+	head := " " + "    " + fitRight("size", 9) + " " + fit("path", pw) + " " + fit("age", 5) + " " + fit("updatedAt", 10) + " " + fit("source", 16)
 	lines = append(lines, style(m.Plain, "1", head))
 
 	vis := m.visible()
 	rowsH := h - len(lines) - 1
 	top := min(max(m.Cursor-rowsH/2, 0), max(len(vis)-rowsH, 0))
 	if len(vis) == 0 {
-		lines = append(lines, "  nothing to show (o: optional)")
+		if m.Filter != "" {
+			lines = append(lines, "  nothing matches the search (esc clears it)")
+		} else {
+			lines = append(lines, "  nothing is ready to delete")
+			for _, l := range hiddenLines(m) {
+				lines = append(lines, "  "+l)
+			}
+		}
 	}
 	for i := top; i < len(vis) && i < top+rowsH; i++ {
 		lines = append(lines, listRow(m, vis[i], i == m.Cursor, pw))
@@ -208,7 +251,7 @@ func listRow(m Model, r Row, cur bool, pw int) string {
 	}
 	line := mark + box + " " + fitRight(fmtBytes(r.Bytes), 9) + " " + fit(shorten(r.Path, pw), pw) + " " +
 		fit(fmtAge(r.Created, m.Summary.Now), 5) + " " + fit(fmtDate(r.Updated), 10) + " " +
-		fit(sourceLabel(r.Source, m.Plain), 14)
+		fit(sourceText(r, m.Plain), 16)
 	switch {
 	case cur:
 		return style(m.Plain, "7", line)
@@ -266,7 +309,10 @@ func viewDetail(m Model, w, h int) []string {
 	add("created", fmtDate(r.Created)+" ("+fmtAge(r.Created, m.Summary.Now)+")")
 	add("updatedAt", fmtDate(r.Updated))
 	add("category", r.Category+" "+dot(m.Plain)+" "+r.RuleKey)
-	add("source", sourceLabel(r.Source, m.Plain))
+	add("source", sourceText(r, m.Plain))
+	if r.Source == SrcKept && r.Guard != "" {
+		add("kept", guardMeaning(r.Guard))
+	}
 	if len(r.Members) > 0 {
 		add("members", fmt.Sprintf("%d", len(r.Members)))
 	}

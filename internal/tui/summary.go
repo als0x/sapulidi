@@ -161,7 +161,7 @@ func rowsOf(s engine.Summary) []Row {
 			continue
 		}
 		row := Row{Path: k.Path, Bytes: -1, Source: SrcKept, Category: k.Category, RuleKey: k.RuleKey,
-			Why: "kept by a guard: " + k.Why}
+			Why: "kept by a guard: " + k.Why, Guard: k.Why}
 		if k.Why == "excluded" {
 			row.Source, row.Why = SrcExcluded, excludedReason
 			row.Origin = ruleSource[k.RuleKey]

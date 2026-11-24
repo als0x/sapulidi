@@ -1,0 +1,24 @@
++- summary -----------------------------------+ +- keys -----------------------+
+| agents installed: 2                         | | esc: back     d: delete      |
+| to remove: 0 B, 0 of 0 selected             | | / : search    s: sort        |
+| excluded: 0                                 | | enter: detail space: select  |
+| schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
+| disk free: 37.3 GB -> 37.3 GB               | | o: optional   g: guarded     |
+| optional (off): 1 | 762.9 MB | o            | | q: quit                      |
+| kept: 1 | g                                 | +------------------------------+
++---------------------------------------------+                                 
+          size path                            age   updatedAt  source          
+  nothing is ready to delete
+  optional (off): 1 | 762.9 MB | o
+  kept: 1 | g
+
+
+
+
+
+
+
+
+
+
+0 rows, sorted by size, largest first
