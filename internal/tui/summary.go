@@ -45,6 +45,18 @@ type EngineDeps struct {
 	bases   []string
 }
 
+// withResolved adds the symlink-resolved spelling of each base (/tmp and /private/tmp on macOS) when it differs;
+// a base that cannot be resolved keeps only its own spelling.
+func withResolved(bases []string) []string {
+	out := slices.Clone(bases)
+	for _, b := range bases {
+		if r, err := filepath.EvalSymlinks(b); err == nil && r != b && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // cleanBases drops empty and relative entries and duplicates, and trims trailing slashes.
 func cleanBases(in []string) []string {
 	var out []string
@@ -91,7 +103,7 @@ func (e *EngineDeps) Scan(ctx context.Context, progress func(category string, do
 	for _, r := range env.Roots {
 		e.roots = append(e.roots, r.Path)
 	}
-	e.bases = cleanBases(append(env.Platform.ScratchBases(), env.TempDir))
+	e.bases = withResolved(cleanBases(append(slices.Clone(env.Platform.ScratchBases()), env.TempDir)))
 	return rowsOf(sum), nil
 }
 

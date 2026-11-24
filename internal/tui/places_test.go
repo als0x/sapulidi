@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -117,6 +119,66 @@ func TestPlaceOfBases(t *testing.T) {
 	}
 	if got := placeOf("/z/y/q", nil, nil, home); got != "/z/y/" {
 		t.Errorf("no bases: %q", got)
+	}
+}
+
+func TestCleanBases(t *testing.T) {
+	got := cleanBases([]string{"/a/", "", "rel", "/a", "/b"})
+	if want := []string{"/a", "/b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("cleanBases = %v, want %v", got, want)
+	}
+}
+
+func TestWithResolvedAddsTheOtherSpelling(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	link := filepath.Join(dir, "link")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := []string{link, filepath.Join(dir, "missing")}
+	got := withResolved(in)
+	if want := []string{link, filepath.Join(dir, "missing"), resolved}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("withResolved = %v, want %v", got, want)
+	}
+	if len(in) != 2 {
+		t.Fatalf("input changed: %v", in)
+	}
+}
+
+func TestBothSpellingsOfABaseShareOnePlace(t *testing.T) {
+	bases := []string{"/tmp/claude-502", "/private/tmp/claude-502"}
+	a := placeOf("/private/tmp/claude-502/x/y", nil, bases, "/home/user")
+	b := placeOf("/tmp/claude-502/z/w", nil, bases, "/home/user")
+	if a != "/private/tmp/claude-502/" || b != "/tmp/claude-502/" {
+		t.Fatalf("places %q %q", a, b)
+	}
+	// a row spelled with the resolved form, base given only as /tmp plus its resolved form: one place per spelling,
+	// and the resolved row lands under the resolved base rather than /private/tmp/claude-502/x/
+	if got := placeOf("/private/tmp/claude-502/x/y", nil, bases[:1], "/home/user"); got != "/private/tmp/claude-502/x/" {
+		t.Fatalf("without the resolved form: %q", got)
+	}
+}
+
+func TestSpaceOnAManyRowPlaceSaysSo(t *testing.T) {
+	m, _ := keys(scratchModel(), "jjj ")
+	if want := "selected 2 ready rows in " + pScratch + " (enter to see them)"; m.Status != want {
+		t.Fatalf("status %q, want %q", m.Status, want)
+	}
+	one, _ := keys(placesModel(), "jj ") // ~/old/ has no ready row; nvm below has two
+	if strings.Contains(one.Status, "selected") {
+		t.Fatalf("unexpected status %q", one.Status)
+	}
+	again, _ := keys(m, " ") // deselect: no message
+	if again.Status != "" {
+		t.Fatalf("deselect status %q", again.Status)
 	}
 }
 

@@ -36,7 +36,7 @@ func longestPrefix(path string, dirs []string, self bool) string {
 		if d == "" || !filepath.IsAbs(d) {
 			continue
 		}
-		if (self && path == d || strings.HasPrefix(path, d+"/")) && len(d) > len(best) {
+		if ((self && path == d) || strings.HasPrefix(path, d+"/")) && len(d) > len(best) {
 			best = d
 		}
 	}
@@ -259,6 +259,9 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Rune == ' ':
 		if curOK {
 			m = selectReadyIn(m, []place{cur})
+			if cur.ReadyN > 1 && m.Status == "" && m.placeReadySelected(cur.Name) {
+				m.Status = fmt.Sprintf("selected %d ready rows in %s (enter to see them)", cur.ReadyN, cur.Name)
+			}
 		}
 	case k.Rune == 's':
 		m.Sort = nextPlacesSort(m.Sort)
@@ -276,6 +279,16 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 		return openConfirm(m)
 	}
 	return m, nil
+}
+
+// placeReadySelected reports whether every ready row of the place is selected.
+func (m Model) placeReadySelected(name string) bool {
+	for _, r := range m.Rows {
+		if r.Place == name && readyRow(r) && !m.Selected[r.Path] {
+			return false
+		}
+	}
+	return true
 }
 
 // selectReadyIn toggles every READY row of the given places: when all of them are selected they are deselected.
