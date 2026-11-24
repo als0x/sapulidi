@@ -74,6 +74,14 @@ func init() {
 }
 
 func runHelp(app *App, _ []string) int {
+	if app.JSON {
+		names := []string{}
+		for _, c := range sortedCommands() {
+			names = append(names, c.Name)
+		}
+		writeJSON(app.Stdout, map[string]any{"usage": "usage: sapulidi [--json] <command> [args]", "commands": names})
+		return 0
+	}
 	fmt.Fprintln(app.Stdout, "usage: sapulidi [--json] <command> [args]")
 	fmt.Fprintln(app.Stdout)
 	for _, c := range sortedCommands() {

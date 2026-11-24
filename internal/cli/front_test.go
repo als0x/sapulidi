@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -177,7 +178,6 @@ func TestNoArgsHelpFallbacks(t *testing.T) {
 	}{
 		"not a terminal": {false, func(*App) int { return 7 }, nil},
 		"nil TUI":        {true, nil, nil},
-		"json":           {true, func(*App) int { return 7 }, []string{"--json"}},
 	}
 	for name, c := range cases {
 		withFakeTerminal(t, c.term, c.tui)
@@ -188,6 +188,42 @@ func TestNoArgsHelpFallbacks(t *testing.T) {
 		if strings.HasPrefix(strings.TrimSpace(out), "{") {
 			t.Errorf("%s: help must not be JSON: %q", name, out)
 		}
+	}
+}
+
+type helpDoc struct {
+	Usage    string   `json:"usage"`
+	Commands []string `json:"commands"`
+}
+
+func TestJSONWithoutCommandPrintsOneDocument(t *testing.T) {
+	withFakeTerminal(t, true, func(*App) int { return 7 })
+	var docs []helpDoc
+	for _, args := range [][]string{{"--json"}, {"--json", "--help"}, {"--help", "--json"}} {
+		code, out, errs := runFront(t, args...)
+		if code != 0 || errs != "" {
+			t.Fatalf("%v: code %d stderr %q", args, code, errs)
+		}
+		dec := json.NewDecoder(strings.NewReader(out))
+		var d helpDoc
+		if err := dec.Decode(&d); err != nil || dec.More() {
+			t.Fatalf("%v: not exactly one JSON document: %v %q", args, err, out)
+		}
+		if !strings.Contains(d.Usage, "usage:") || len(d.Commands) == 0 {
+			t.Fatalf("%v: %+v", args, d)
+		}
+		docs = append(docs, d)
+	}
+	if strings.Join(docs[0].Commands, ",") != strings.Join(docs[1].Commands, ",") || docs[0].Usage != docs[1].Usage {
+		t.Fatalf("shapes differ: %+v %+v", docs[0], docs[1])
+	}
+}
+
+func TestJSONHelpCommandPrintsJSON(t *testing.T) {
+	code, out, _ := runFront(t, "--json", "help")
+	var d helpDoc
+	if code != 0 || json.Unmarshal([]byte(out), &d) != nil || len(d.Commands) == 0 {
+		t.Fatalf("code %d %q", code, out)
 	}
 }
 
