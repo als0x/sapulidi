@@ -260,6 +260,9 @@ func footerOf(m Model) string {
 	if m.Filtering {
 		return join("type to search", "enter keep", "esc clear")
 	}
+	if m.PlacePrompt != "" {
+		return join("y yes", "n or esc no")
+	}
 	switch m.Screen {
 	case ScreenPlaces:
 		return join("enter open", "space select", "d delete", "g protected", "c view", "? help", "q quit")

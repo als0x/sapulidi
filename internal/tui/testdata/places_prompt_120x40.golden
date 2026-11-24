@@ -1,0 +1,40 @@
++- summary ------------------------------------------------------------------------------------------------------------+
+| Free now: 1.9 GB automatic | 762.9 MB if you choose | 3 protected                                                    |
+| to remove: 0 B, 0 of 4 selected | excluded: 2                                                                        |
+| agents installed: 2 | schedule: every 30m, next 14:30                                                                |
+| disk free: 37.3 GB -> 37.3 GB                                                                                        |
+| kept: 3 | g                                                                                                          |
+| not covered by any rule: searching...                                                                                |
++----------------------------------------------------------------------------------------------------------------------+
+         ready  optional place                                                                          kept updatedAt 
+  ready = removable now | optional = you pick it | kept = protected
+ [ ]    1.1 GB         - ~/proj/                                                                           1 2026-11-21
+ [ ]  762.9 MB         - ~/.nvm/versions/node/                                                             1 2026-11-20
+>[ ]         -  762.9 MB ~/old/                                                                            - 2025-02-03
+ [-]         -         - commands | docker                                                                 - -         
+ [-]         -         - ~/ex/                                                                             - -         
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Select all 1 optional row in ~/old/ (762.9 MB)?  y: yes | n / esc: no
+y yes | n or esc no

@@ -232,6 +232,9 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	if m.Filtering {
 		return filterKey(m, k)
 	}
+	if m.PlacePrompt != "" {
+		return promptKey(m, k)
+	}
 	if m.small() && (k.Special == KeyEnter || k.Rune == 'a' || k.Rune == ' ' || k.Rune == 'd') {
 		return m, nil
 	}
@@ -263,10 +266,7 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 		m = selectReadyIn(m, m.places())
 	case k.Rune == ' ':
 		if curOK {
-			m = selectReadyIn(m, []place{cur})
-			if cur.ReadyN > 1 && m.Status == "" && m.placeReadySelected(cur.Name) {
-				m.Status = fmt.Sprintf("selected %d ready rows in %s (enter to see them)", cur.ReadyN, cur.Name)
-			}
+			m = spacePlace(m, cur)
 		}
 	case k.Rune == 's':
 		m.Sort = nextPlacesSort(m.Sort)
@@ -290,6 +290,84 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	return m, nil
 }
 
+// optionalPaths are the selectable optional-off rows of a place.
+func (m Model) optionalPaths(name string) (paths []string, all bool) {
+	all = true
+	for _, r := range m.Rows {
+		if r.Place == name && r.selectable() && !readyRow(r) {
+			paths = append(paths, r.Path)
+			all = all && m.Selected[r.Path]
+		}
+	}
+	return paths, all
+}
+
+// spacePlace is `space` on a place. Ready rows are toggled directly; a place with only optional rows asks first,
+// so an optional row is never selected without the user seeing the question.
+func spacePlace(m Model, cur place) Model {
+	if cur.ReadyN == 0 && cur.OptN > 0 {
+		paths, all := m.optionalPaths(cur.Name)
+		if !all {
+			m.PlacePrompt = cur.Name
+			return m
+		}
+		m.Selected = cloneSel(m.Selected)
+		for _, p := range paths {
+			delete(m.Selected, p)
+		}
+		return m
+	}
+	m = selectReadyIn(m, []place{cur})
+	if cur.ReadyN > 0 && m.Status == "" && m.placeReadySelected(cur.Name) {
+		switch {
+		case cur.OptN > 0:
+			m.Status = fmt.Sprintf("%s selected; %s (%s) stay unselected: enter to pick, or space again after clearing to add them",
+				plural(cur.ReadyN, "ready row"), plural(cur.OptN, "optional row"), sizeCell(1, cur.OptBytes, cur.OptUnknwn))
+		case cur.ReadyN > 1:
+			m.Status = fmt.Sprintf("selected %d ready rows in %s (enter to see them)", cur.ReadyN, cur.Name)
+		}
+	}
+	return m
+}
+
+// promptKey handles the optional-rows question: only y, n and esc do anything.
+func promptKey(m Model, k KeyMsg) (Model, []Effect) {
+	if k.Rune != 'y' && k.Rune != 'n' && k.Special != KeyEsc {
+		return m, nil
+	}
+	name := m.PlacePrompt
+	m.PlacePrompt = ""
+	if k.Rune != 'y' {
+		return m, nil
+	}
+	paths, _ := m.optionalPaths(name)
+	for _, p := range m.allPlaces() {
+		if p.Name == name && p.ReadyN > 0 { // the rows changed under the prompt: ask again with space
+			paths = nil
+		}
+	}
+	m.Selected = cloneSel(m.Selected)
+	for _, p := range paths {
+		m.Selected[p] = true
+	}
+	return m, nil
+}
+
+// promptLine is the one-line question of the optional-rows prompt, fitted to w columns.
+func promptLine(m Model, w int) string {
+	n, b, u := 0, int64(0), false
+	for _, p := range m.allPlaces() {
+		if p.Name == m.PlacePrompt {
+			n, b, u = p.OptN, p.OptBytes, p.OptUnknwn
+		}
+	}
+	tail := fmt.Sprintf(")?  y: yes %s n / esc: no", dot(m.Plain))
+	head := fmt.Sprintf("Select all %s in ", plural(n, "optional row"))
+	size := " (" + sizeCell(1, b, u)
+	room := w - len(head) - len(size) - len(tail)
+	return head + shorten(placeText(m, m.PlacePrompt), max(room, 8)) + size + tail
+}
+
 // placeReadySelected reports whether every ready row of the place is selected.
 func (m Model) placeReadySelected(name string) bool {
 	for _, r := range m.Rows {
@@ -304,9 +382,10 @@ func (m Model) placeReadySelected(name string) bool {
 // Optional-off and kept rows are never touched. With nothing ready it only says why.
 func selectReadyIn(m Model, ps []place) Model {
 	names := map[string]bool{}
-	var optOnly, keptOnly bool
+	var optOnly, keptOnly, wholeOnly bool
 	for _, p := range ps {
 		names[p.Name] = true
+		wholeOnly = wholeOnly || p.Selectable == 0 && p.OtherN > 0
 		optOnly = optOnly || p.ReadyN == 0 && p.OptN > 0
 		keptOnly = keptOnly || p.ReadyN == 0 && p.KeptN > 0
 	}
@@ -324,8 +403,8 @@ func selectReadyIn(m Model, ps []place) Model {
 			m.Status = "nothing ready to select"
 		case optOnly:
 			m.Status = "only optional rows here: open it and pick them"
-		case keptOnly:
-			m.Status = "only kept rows here"
+		case keptOnly, wholeOnly:
+			m.Status = "protected: nothing here can be removed from this screen"
 		default:
 			m.Status = "nothing ready to select here"
 		}
@@ -483,6 +562,8 @@ func nothingReadyLine(m Model) string {
 
 func placesStatus(m Model, vis []place, w int) string {
 	switch {
+	case m.PlacePrompt != "":
+		return promptLine(m, w)
 	case m.Filtering:
 		return cut("/"+m.Filter+"_", w)
 	case m.Summary.Paused:

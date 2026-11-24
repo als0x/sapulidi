@@ -19,6 +19,54 @@ func isReady(r Row) bool { return r.Block == "" && (r.Source == "auto" || r.Sour
 // shadowKey applies a key press to want. prev is the model before the key; it only says what the key targets
 // (the row or place under the cursor, the rows or places in view).
 func shadowKey(want map[string]bool, prev Model, key string) {
+	if prev.PlacePrompt != "" { // the optional-rows question: only y selects, and only a place with nothing ready
+		if key != "y" {
+			return
+		}
+		var opt []string
+		for _, r := range prev.Rows {
+			if r.Place != prev.PlacePrompt {
+				continue
+			}
+			if isReady(r) {
+				return
+			}
+			if isSel(r) {
+				opt = append(opt, r.Path)
+			}
+		}
+		for _, p := range opt {
+			want[p] = true
+		}
+		return
+	}
+	if prev.Screen == ScreenPlaces && !prev.Filtering && !prev.small() && key == " " {
+		// an optional-only place asks first; when all its optional rows are selected, space clears them
+		if cp, ok := prev.cursorPlace(); ok {
+			var opt []string
+			ready := false
+			for _, r := range prev.Rows {
+				if r.Place == cp.Name {
+					ready = ready || isReady(r)
+					if isSel(r) && !isReady(r) {
+						opt = append(opt, r.Path)
+					}
+				}
+			}
+			if !ready && len(opt) > 0 {
+				all := true
+				for _, p := range opt {
+					all = all && want[p]
+				}
+				if all {
+					for _, p := range opt {
+						delete(want, p)
+					}
+				}
+				return
+			}
+		}
+	}
 	if prev.Filtering || prev.small() || key != " " && key != "a" {
 		return // typed text, a blocked key, or a key that never touches the selection
 	}

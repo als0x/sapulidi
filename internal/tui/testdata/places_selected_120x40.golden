@@ -36,5 +36,5 @@
 
 
 
-only optional rows here: open it and pick them
-enter open | space select | d delete | g protected | c view | ? help | q quit
+Select all 1 optional row in ~/old/ (762.9 MB)?  y: yes | n / esc: no
+y yes | n or esc no
