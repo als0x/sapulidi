@@ -37,7 +37,7 @@ func groupRows(n int) []Row {
 
 func modelWith(rows []Row) Model {
 	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
-	return m
+	return flat(m)
 }
 
 func TestExclusionWhileConfirmOpenNeverDeletesTheRow(t *testing.T) {
@@ -73,7 +73,7 @@ func TestYRevalidatesAStaleConfirmation(t *testing.T) {
 func TestScanDoneClosesConfirmAndIgnoredWhilePending(t *testing.T) {
 	m, _ := keys(listModel(), " d")
 	m, _ = Update(m, ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()})
-	if m.Screen != ScreenList || m.Confirm != nil {
+	if m.Screen != ScreenPlaces || m.Confirm != nil {
 		t.Fatal("ScanDoneMsg must close the confirmation")
 	}
 	m, _ = keys(m, "dy") // the selection survives the rescan
@@ -310,32 +310,14 @@ func oracleLess(sortKey SortKey, a, b Row) bool {
 
 // oracle is the delete list the user must see: written from the spec, not from the model's own helpers.
 func oracle(m Model) []string {
+	// the selection is global: no screen, search, `o` or `g` takes part; the order is largest first, then path
 	var rows []Row
-	f := strings.ToLower(m.Filter)
 	for _, r := range m.Rows {
-		origin := r.Source
-		if origin == "excluded" {
-			if origin = r.Base; origin == "" {
-				origin = "auto"
-			}
-		}
-		if origin == "optional-off" && !m.ShowOptional {
-			continue
-		}
-		if f != "" {
-			hit := false
-			for _, s := range []string{r.Path, r.Category, r.Source, strings.ReplaceAll(r.Source, "-", " · "), r.Source} {
-				hit = hit || strings.Contains(strings.ToLower(s), f)
-			}
-			if !hit {
-				continue
-			}
-		}
 		if (r.Source == "auto" || r.Source == "optional-on" || r.Source == "optional-off") && r.Block == "" && m.Selected[r.Path] {
 			rows = append(rows, r)
 		}
 	}
-	sort.SliceStable(rows, func(i, j int) bool { return oracleLess(m.Sort, rows[i], rows[j]) })
+	sort.SliceStable(rows, func(i, j int) bool { return oracleLess(SortSize, rows[i], rows[j]) })
 	var out []string
 	seen := map[string]bool{}
 	for _, r := range rows {
@@ -381,11 +363,11 @@ func randomRows(rng *rand.Rand) []Row {
 }
 
 func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
-	alphabet := []string{"j", "k", " ", "a", "x", "s", "o", "/", "d", "y", "n", "q", "e", "g", "<esc>", "<enter>", "<up>", "<down>", "<bs>"}
+	alphabet := []string{"j", "k", " ", "a", "x", "s", "o", "/", "d", "y", "n", "q", "e", "g", "<esc>", "<enter>", "<up>", "<down>", "<bs>", "c", "c"}
 	sizes := []ResizeMsg{{70, 20}, {80, 24}, {120, 40}, {80, 300}}
 	for seq := range 400 {
 		rng := rand.New(rand.NewSource(int64(seq)))
-		m := listModel()
+		m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()}) // starts on the places
 		for step := range 80 {
 			prev := m
 			var msg Msg
@@ -403,7 +385,26 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 				msg = ExclusionChangedMsg{Path: p, Excluded: rng.Intn(3) != 0}
 			default:
 				var eff []Effect
-				m, eff = keys(m, alphabet[rng.Intn(len(alphabet))])
+				key := alphabet[rng.Intn(len(alphabet))]
+				m, eff = keys(m, key)
+				// Switching views, o, g, search, sort and moving never change the selection; only space and a add to
+				// it (while a search is being typed they are text), and x and d never touch it.
+				if key != " " && key != "a" || prev.Filtering {
+					if !reflect.DeepEqual(m.Selected, prev.Selected) {
+						t.Fatalf("seq %d step %d: key %q changed the selection on screen %v", seq, step, key, prev.Screen)
+					}
+				} else if prev.Screen == ScreenPlaces && !prev.small() {
+					for p := range m.Selected {
+						if prev.Selected[p] {
+							continue
+						}
+						for _, r := range m.Rows {
+							if r.Path == p && r.Source != "auto" && r.Source != "optional-on" {
+								t.Fatalf("seq %d step %d: places key %q selected a non-ready row %s (%s)", seq, step, key, p, r.Source)
+							}
+						}
+					}
+				}
 				for _, e := range eff {
 					switch e := e.(type) {
 					case AddExclusion:
@@ -438,8 +439,17 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 					t.Fatalf("seq %d step %d: %s is selected but cannot be", seq, step, p)
 				}
 			}
-			if m.Screen == ScreenConfirm && !reflect.DeepEqual(m.Confirm, oracle(m)) {
-				t.Fatalf("seq %d step %d: confirmation %v differs from oracle %v", seq, step, m.Confirm, oracle(m))
+			if m.Screen == ScreenConfirm {
+				if !reflect.DeepEqual(m.Confirm, oracle(m)) {
+					t.Fatalf("seq %d step %d: confirmation %v differs from oracle %v", seq, step, m.Confirm, oracle(m))
+				}
+				text, _ := confirmLines(m, 300, 400)
+				all := strings.Join(text, "\n")
+				for _, p := range m.Confirm {
+					if !strings.Contains(all, p) {
+						t.Fatalf("seq %d step %d: the confirmation does not list %s", seq, step, p)
+					}
+				}
 			}
 		}
 	}

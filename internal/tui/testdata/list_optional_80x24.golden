@@ -4,7 +4,7 @@
 | excluded: 1                                 | | enter: detail space: select  |
 | schedule: every 30m, next 14:30             | | x: exclude    a: select all  |
 | disk free: 37.3 GB -> 37.3 GB               | | o: optional   g: guarded     |
-| kept: 1 | g                                 | | q: quit                      |
+| kept: 1 | g                                 | | q: quit       c: view        |
 +---------------------------------------------+ +------------------------------+
           size path                            age   updatedAt  source          
 >[ ]    2.9 GB /home/user/.cache/go-build      22mo  2026-11-01 auto            

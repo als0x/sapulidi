@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,6 +40,7 @@ type EngineDeps struct {
 
 	now     time.Time
 	freeNow uint64
+	roots   []string
 }
 
 type realTerm struct{ *term.Term }
@@ -69,12 +72,17 @@ func (e *EngineDeps) Scan(ctx context.Context, progress func(category string, do
 		return nil, errors.New("exclusions are not loaded")
 	}
 	e.now, e.freeNow = env.Now, sum.FreeBefore
+	e.roots = e.roots[:0]
+	for _, r := range env.Roots {
+		e.roots = append(e.roots, r.Path)
+	}
 	return rowsOf(sum), nil
 }
 
 // Summary implements Deps.
 func (e *EngineDeps) Summary() SummaryData {
-	s := SummaryData{Now: e.now, FreeNow: e.freeNow}
+	s := SummaryData{Now: e.now, FreeNow: e.freeNow, Roots: slices.Clone(e.roots)}
+	s.Home, _ = os.UserHomeDir()
 	if e.now.IsZero() {
 		s.Now = time.Now()
 	}

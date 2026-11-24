@@ -21,6 +21,8 @@ func View(m Model, width, height int) []string {
 		lines = tooSmall(width, height)
 	case m.Screen == ScreenScanning:
 		lines = viewScanning(m, width, height)
+	case m.Screen == ScreenPlaces:
+		lines = viewPlaces(m, width, height)
 	case m.Screen == ScreenDetail:
 		lines = viewDetail(m, width, height)
 	case m.Screen == ScreenConfirm:
@@ -119,7 +121,7 @@ var keyHelp = [][2]string{
 	{"enter: detail", "space: select"},
 	{"x: exclude", "a: select all"},
 	{"o: optional", "g: guarded"},
-	{"q: quit", ""},
+	{"q: quit", "c: view"},
 }
 
 // hiddenLines are the summary lines that say what the default list leaves out; none when nothing is hidden.
@@ -166,7 +168,7 @@ func summaryLines(m Model) []string {
 			excluded++
 		}
 	}
-	for _, r := range m.visible() {
+	for _, r := range m.Rows { // the selection is global: so is the count it is shown against
 		if r.selectable() {
 			selectable++
 		}
@@ -202,15 +204,46 @@ func summaryLines(m Model) []string {
 	return append(lines, hiddenLines(m)...)
 }
 
-func viewList(m Model, w, h int) []string {
+// placesKeyHelp is the keys panel of the places screen: no `o`, optional rows are always listed.
+var placesKeyHelp = [][2]string{
+	{"q: quit", "d: delete"},
+	{"/ : search", "s: sort"},
+	{"enter: open", "space: select"},
+	{"c: view", "a: select all"},
+	{"g: guarded", "esc: reset"},
+}
+
+// placeKeyHelp is the keys panel inside a place.
+var placeKeyHelp = [][2]string{
+	{"esc: places", "d: delete"},
+	{"/ : search", "s: sort"},
+	{"enter: detail", "space: select"},
+	{"x: exclude", "a: select all"},
+	{"g: guarded", "c: view"},
+	{"q: quit", ""},
+}
+
+// topPanels draws the summary and the keys of the screen side by side.
+func topPanels(m Model, w int) []string {
 	rw := max(32, w/3)
 	lw := w - rw - 1
 	left := panel(m.Plain, "summary", summaryLines(m), lw)
-	keys := make([]string, len(keyHelp))
-	for i, k := range keyHelp {
+	help := keyHelp
+	switch m.Screen {
+	case ScreenPlaces:
+		help = placesKeyHelp
+	case ScreenPlace:
+		help = placeKeyHelp
+	}
+	keys := make([]string, len(help))
+	for i, k := range help {
 		keys[i] = fit(k[0], 14) + k[1]
 	}
-	lines := sideBySide(left, panel(m.Plain, "keys", keys, rw), lw, rw)
+	return sideBySide(left, panel(m.Plain, "keys", keys, rw), lw, rw)
+}
+
+func viewList(m Model, w, h int) []string {
+	lines := topPanels(m, w)
 
 	pw := w - 49
 	head := " " + "    " + fitRight("size", 9) + " " + fit("path", pw) + " " + fit("age", 5) + " " + fit("updatedAt", 10) + " " + fit("source", 16)
@@ -274,6 +307,9 @@ func statusLine(m Model, vis []Row, w int) string {
 		return cut(r.reason(), w)
 	}
 	s := fmt.Sprintf("%d rows, sorted by %s", len(vis), sortNames[m.Sort])
+	if m.Screen == ScreenPlace {
+		s = placeText(m, m.Place) + " " + s
+	}
 	if m.Filter != "" {
 		s = fmt.Sprintf("filter: %s (esc clears), %s", m.Filter, s)
 	}

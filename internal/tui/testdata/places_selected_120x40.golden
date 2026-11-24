@@ -1,0 +1,40 @@
++- summary -------------------------------------------------------------------+ +- keys -------------------------------+
+| agents installed: 2                                                         | | q: quit       d: delete              |
+| to remove: 1.9 GB, 3 of 4 selected                                          | | / : search    s: sort                |
+| excluded: 2                                                                 | | enter: open   space: select          |
+| schedule: every 30m, next 14:30                                             | | c: view       a: select all          |
+| disk free: 37.3 GB -> 39.1 GB                                               | | g: guarded    esc: reset             |
+| kept: 3 | g                                                                 | +--------------------------------------+
++-----------------------------------------------------------------------------+                                         
+         ready  optional place                                                                          kept updatedAt 
+ [x]    1.1 GB         - ~/proj/                                                                           1 2026-11-21
+ [x]  762.9 MB         - ~/.nvm/versions/node/                                                             1 2026-11-20
+>[ ]         -  762.9 MB ~/old/                                                                            - 2025-02-03
+ [-]         -         - commands | docker                                                                 - -         
+ [-]         -         - ~/ex/                                                                             - -         
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+only optional rows here: open it and pick them

@@ -43,6 +43,12 @@ func fixtureSummary() SummaryData {
 func listModel() Model {
 	m := NewModel(true)
 	m, _ = Update(m, ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()})
+	return flat(m)
+}
+
+// flat switches a model that just got its scan from the places to the flat candidate list (`c`).
+func flat(m Model) Model {
+	m, _ = Update(m, KeyMsg{Rune: 'c'})
 	return m
 }
 
@@ -98,7 +104,7 @@ func fx4Rows() []Row {
 
 func fx4Model(rows []Row) Model {
 	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
-	return m
+	return flat(m)
 }
 
 func screen(m Model) string { return strings.Join(View(m, 100, 30), "\n") }
@@ -356,9 +362,9 @@ func TestCursorStartsOnFirstSelectableRow(t *testing.T) {
 	}
 }
 
-func TestSelectedCountRefersToTheDefaultList(t *testing.T) {
+func TestSelectedCountIsGlobal(t *testing.T) {
 	m, _ := keys(fx4Model(fx4Rows()), "a")
-	if s := screen(m); !strings.Contains(s, "2 of 2 selected") {
+	if s := screen(m); !strings.Contains(s, "2 of 4 selected") { // 4 selectable rows in the scan, 2 in view
 		t.Fatalf("counts:\n%s", s)
 	}
 }
@@ -368,7 +374,7 @@ func TestInitStartsScanAndEscCancels(t *testing.T) {
 		t.Fatalf("Init = %v", got)
 	}
 	m, eff := keys(NewModel(true), "<esc>")
-	if !reflect.DeepEqual(eff, []Effect{CancelScan{}}) || m.Screen != ScreenList {
+	if !reflect.DeepEqual(eff, []Effect{CancelScan{}}) || m.Screen != ScreenPlaces {
 		t.Fatalf("esc while scanning: %v %v", eff, m.Screen)
 	}
 	if _, eff = keys(NewModel(true), "q"); len(eff) != 0 {
@@ -434,8 +440,8 @@ func TestOptionalOffGroupToggle(t *testing.T) {
 		t.Fatal("a with o on selects the optional-off row")
 	}
 	m, _ = keys(m, "o")
-	if m.Selected["/home/user/old/node_modules"] {
-		t.Fatal("hiding the group must drop its selection")
+	if !m.Selected["/home/user/old/node_modules"] {
+		t.Fatal("hiding optional rows with o must keep them selected (the selection is global)")
 	}
 }
 
@@ -586,9 +592,11 @@ func TestFilter(t *testing.T) {
 	}
 }
 
-func TestSelectedHiddenByFilterIsNotDeleted(t *testing.T) {
+func TestSelectedHiddenByFilterStaysInTheDeleteList(t *testing.T) {
 	m, _ := keys(listModel(), "a/docker<enter>d")
-	if m.Screen != ScreenConfirm || !reflect.DeepEqual(m.Confirm, []string{"docker:abc123", "docker:def456"}) {
+	want := []string{"/home/user/.cache/go-build", "/home/user/proj/node_modules", "docker:abc123", "docker:def456",
+		"/home/user/a/very/long/directory/name/that/does/not/fit/in/the/path/column/of/the/list/target", "/home/user/zz"}
+	if m.Screen != ScreenConfirm || !reflect.DeepEqual(m.Confirm, want) {
 		t.Fatalf("confirm = %v", m.Confirm)
 	}
 }
@@ -614,7 +622,7 @@ func TestPausedBlocksDelete(t *testing.T) {
 	s.Paused = true
 	m, _ = Update(m, ScanDoneMsg{Rows: fixtureRows(), Summary: s})
 	m, eff := keys(m, "ad")
-	if m.Screen != ScreenList || len(eff) != 0 {
+	if m.Screen != ScreenPlaces || len(eff) != 0 {
 		t.Fatalf("screen=%v eff=%v", m.Screen, eff)
 	}
 	if got := View(m, 80, 24); !strings.Contains(strings.Join(got, "\n"), "paused: run sapulidi resume") {
