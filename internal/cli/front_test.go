@@ -219,6 +219,14 @@ func TestJSONWithoutCommandPrintsOneDocument(t *testing.T) {
 	}
 }
 
+func TestJSONHelpCommandPrintsJSON(t *testing.T) {
+	code, out, _ := runFront(t, "--json", "help")
+	var d helpDoc
+	if code != 0 || json.Unmarshal([]byte(out), &d) != nil || len(d.Commands) == 0 {
+		t.Fatalf("code %d %q", code, out)
+	}
+}
+
 func TestFrontNeverTouchesExplicit(t *testing.T) {
 	b, err := os.ReadFile("front.go")
 	if err != nil {

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/als0x/sapulidi"
 	"github.com/als0x/sapulidi/internal/confirm"
@@ -11,6 +13,20 @@ import (
 	"github.com/als0x/sapulidi/internal/install"
 	"github.com/als0x/sapulidi/internal/schedule"
 )
+
+// keptOnly is a partial result whose claude steps are done and whose only leftovers are files or folders
+// removal chose to keep (edited by the user, or holding such a file).
+func keptOnly(r install.Result) bool {
+	if r.Status != "partial" || strings.HasPrefix(r.Detail, "claude steps are left") || len(r.Notes) == 0 {
+		return false
+	}
+	for _, n := range r.Notes {
+		if !strings.HasSuffix(n, ", kept") {
+			return false
+		}
+	}
+	return true
+}
 
 func nonNilResults(r []install.Result) []install.Result {
 	if r == nil {
@@ -55,14 +71,29 @@ func runUninstall(app *App, args []string) int {
 		}
 	}
 	// What `--agents` installed goes first: the registered plugin's hooks run <data>/plugin/bin/sapulidi.
+	// The guards run before anything is removed, the agents step included.
+	if gerr := delivery.CheckPaths(paths, home); gerr != nil {
+		return fail(app, "uninstall", gerr)
+	}
+	if all {
+		if gerr := delivery.CheckOwned(paths); gerr != nil {
+			return fail(app, "uninstall", gerr)
+		}
+	}
 	env := &install.Env{Home: home, Data: paths.Data, Plugin: sapulidi.Plugin}
 	if !app.JSON {
 		env.Log = func(s string) { fmt.Fprintln(app.Stdout, s) }
 	}
 	agents, aerr := env.Remove("all")
 	agentsFailed := aerr != nil
+	var kept []string
 	for _, r := range agents {
-		if r.Failed() {
+		switch {
+		case !r.Failed():
+		case keptOnly(r):
+			// A file the user edited stays; that is not a reason to keep the binaries.
+			kept = append(kept, r.Notes...)
+		default:
 			agentsFailed = true
 		}
 	}
@@ -77,13 +108,15 @@ func runUninstall(app *App, args []string) int {
 			}
 			res.Schedule = append(res.Schedule, j.Label)
 		}
-		msg := "removing what agents installed failed, so nothing else was removed; fix that, then run: sapulidi agents remove all, and sapulidi uninstall again"
+		var msg string
 		if aerr != nil {
-			msg += " (" + aerr.Error() + ")"
-		}
-		for _, r := range agents {
-			for _, n := range r.Notes {
-				msg += "; " + n
+			msg = fmt.Sprintf("%v; fix or delete %s by hand, then run sapulidi uninstall again", aerr, filepath.Join(paths.Data, "agents.json"))
+		} else {
+			msg = "removing what agents installed failed, so <data> was kept; fix that, then run: sapulidi agents remove all, and sapulidi uninstall again"
+			for _, r := range agents {
+				for _, n := range r.Notes {
+					msg += "; " + n
+				}
 			}
 		}
 		if err != nil {
@@ -104,6 +137,9 @@ func runUninstall(app *App, args []string) int {
 			return 1
 		}
 		return 0
+	}
+	for _, k := range kept {
+		fmt.Fprintf(app.Stdout, "kept %s\n", safeText(k))
 	}
 	for _, l := range res.Schedule {
 		fmt.Fprintf(app.Stdout, "removed schedule %s (%s)\n", l, be.Name())
