@@ -137,7 +137,8 @@ func (c *category) Scan(env *core.Env) ([]core.Candidate, []core.Kept, error) {
 			// passes wins; otherwise keep once, preferring a failure after the marker was found.
 			var rule *core.Rule
 			var newest time.Time
-			var failRule *core.Rule
+			var failRule, offRule *core.Rule
+			var offNewest time.Time
 			var failErr error
 			matched := false
 			for i := range rules {
@@ -148,8 +149,15 @@ func (c *category) Scan(env *core.Env) ([]core.Candidate, []core.Kept, error) {
 				matched = true
 				n, err := c.evaluate(env, *r, p)
 				if err == nil {
-					rule, newest = r, n
-					break
+					if env.Settings.RuleEnabled(r.Key()) {
+						rule, newest = r, n
+						break
+					}
+					// A switched-off rule is only a fallback: the engine drops its candidate.
+					if offRule == nil {
+						offRule, offNewest = r, n
+					}
+					continue
 				}
 				if failRule == nil || (isNoMarker(failErr) && !isNoMarker(err)) {
 					failRule, failErr = r, err
@@ -160,6 +168,9 @@ func (c *category) Scan(env *core.Env) ([]core.Candidate, []core.Kept, error) {
 					return fs.SkipDir
 				}
 				return nil
+			}
+			if rule == nil && offRule != nil {
+				rule, newest = offRule, offNewest
 			}
 			if rule == nil {
 				kept = append(kept, keptOf(*failRule, p, failErr))
