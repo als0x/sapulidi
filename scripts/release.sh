@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Prepare a release. Run by the owner, never by CI.
 # usage: scripts/release.sh <version> [--dry-run]
-# Builds the four binaries the same way the release workflow does, bumps the version in the launcher,
-# install.sh and every manifest, writes checksums.txt, and only then runs tests/run.sh. It prints the commit,
+# Bumps the version in the launcher, install.sh and every manifest (the binary embeds them), builds the four
+# binaries from that tree the same way the release workflow does, writes checksums.txt, and only then runs tests/run.sh. It prints the commit,
 # tag and push commands; it never commits, tags or pushes. The tree must be clean at the start. If any step fails, including the
 # suite, a trap runs git checkout on exactly the files it changed (bin/sapulidi, install.sh, checksums.txt and the
 # manifests) and removes dist/, so the tree is as it was found.
@@ -47,17 +47,18 @@ gobuild() { # os arch out
 
 echo "release plan for v$version:"
 echo "  0. check the tree is clean and go matches the go.mod toolchain line"
-echo "  1. build into dist/ (CGO_ENABLED=0, GOAMD64=v1, -trimpath -buildvcs=false):"
+echo "  1. set SAPULIDI_VERSION=$version in bin/sapulidi and install.sh (the binary embeds them)"
+for f in $manifests; do
+	echo "  2. set \"version\": \"$version\" in $f"
+done
+echo "  3. build into dist/ from the bumped tree (CGO_ENABLED=0, GOAMD64=v1, -trimpath -buildvcs=false):"
 for t in $targets; do
 	echo "       sapulidi_${version}_${t%/*}_${t#*/}"
 done
-echo "  2. set SAPULIDI_VERSION=$version in bin/sapulidi and install.sh and write checksums.txt"
-for f in $manifests; do
-	echo "  3. set \"version\": \"$version\" in $f"
-done
-echo "  4. check install.sh and bin/sapulidi pin the same version"
-echo "  5. run bash tests/run.sh (after the new checksums.txt is written)"
-echo "  6. print the commit, tag and push commands (not run)"
+echo "  4. write checksums.txt from dist/"
+echo "  5. check install.sh and bin/sapulidi pin the same version"
+echo "  6. run bash tests/run.sh (after the new checksums.txt is written)"
+echo "  7. print the commit, tag and push commands (not run)"
 
 dirty=$(git status --porcelain)
 want=$(sed -n 's/^toolchain go//p' go.mod)
@@ -91,22 +92,23 @@ restore() {
 }
 trap restore EXIT
 
-rm -rf dist
-mkdir dist
-for t in $targets; do
-	gobuild "${t%/*}" "${t#*/}" "dist/sapulidi_${version}_${t%/*}_${t#*/}"
-done
-
 replace() { # file sed-expression
 	sed "$2" "$1" >"$1.tmp"
 	cat "$1.tmp" >"$1"
 	rm -f "$1.tmp"
 }
 
+# The binary embeds the manifests, skills, hooks and bin/sapulidi, so every file is bumped before the first build.
 replace bin/sapulidi "s/^SAPULIDI_VERSION=.*/SAPULIDI_VERSION=$version/"
 replace install.sh "s/^SAPULIDI_VERSION=.*/SAPULIDI_VERSION=$version/"
 for f in $manifests; do
 	replace "$f" "s/\"version\": \"[^\"]*\"/\"version\": \"$version\"/"
+done
+
+rm -rf dist
+mkdir dist
+for t in $targets; do
+	gobuild "${t%/*}" "${t#*/}" "dist/sapulidi_${version}_${t%/*}_${t#*/}"
 done
 if command -v sha256sum >/dev/null 2>&1; then
 	(cd dist && sha256sum sapulidi_*) >checksums.txt

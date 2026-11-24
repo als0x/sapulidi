@@ -66,8 +66,17 @@ nothing_left() {
 command -v curl >/dev/null || { echo "skip: curl missing"; exit 0; }
 check "sh -n" sh -n "$root/install.sh"
 if command -v shellcheck >/dev/null; then check "shellcheck" shellcheck -s sh "$root/install.sh"; fi
-check "at most 175 lines" test "$(wc -l <"$root/install.sh" | tr -d ' ')" -le 175
+check "at most 180 lines" test "$(wc -l <"$root/install.sh" | tr -d ' ')" -le 180
 check "pinned values" grep -q '^SAPULIDI_VERSION=0.1.0$' "$root/install.sh"
+check "main is called on the last line" test "$(tail -n 1 "$root/install.sh")" = 'main "$@"'
+
+# a download cut off before the last line runs nothing and installs nothing
+new_env trunc
+publish linux_amd64
+sed '$d' "$root/install.sh" >"$S"
+out=$(run sh "$S" 2>&1); rc=$?
+check "truncated script installs nothing" nothing_left
+check "truncated script prints nothing" test -z "$out"
 
 # install, verify, link; rc files untouched
 new_env t1

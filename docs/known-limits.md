@@ -53,6 +53,13 @@ unattended; each is a disk leak, a missing hardening step or an accepted limit.
   removes a container. They are removed by the scheduled run, or by `docker rm` or `podman rm`.
 - A pty-driving agent can fake a terminal, so the terminal tier (including `Explicit` runs and the TUI) rests on the
   host's permission prompts, as before.
+- `sapulidi uninstall` does not remove what `--agents` installed (the extracted plugin folder, the registered plugin
+  and marketplace, the copied skills); run `sapulidi agents remove all` first (tracked as FX3).
+- `install.sh` reads `SAPULIDI_RELEASE_BASE` and `SAPULIDI_RAW_BASE` from the environment. They must be `https://` or
+  `file://`, but a hostile environment can point them at its own server and its own `checksums.txt`.
+- `install.sh` and the launcher run an already installed binary of the pinned version without verifying it again.
+- When only `wget` is available, it cannot refuse an https to http redirect; `curl` is preferred and refuses it.
+- On Linux the TUI does not show the next scheduled run (systemd and cron).
 
 ## Auto-bucket proofs (audit after FR1 M1)
 
