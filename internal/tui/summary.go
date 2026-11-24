@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -41,6 +42,20 @@ type EngineDeps struct {
 	now     time.Time
 	freeNow uint64
 	roots   []string
+	bases   []string
+}
+
+// cleanBases drops empty and relative entries and duplicates, and trims trailing slashes.
+func cleanBases(in []string) []string {
+	var out []string
+	for _, b := range in {
+		b = strings.TrimRight(b, "/")
+		if b == "" || !filepath.IsAbs(b) || slices.Contains(out, b) {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 type realTerm struct{ *term.Term }
@@ -76,12 +91,13 @@ func (e *EngineDeps) Scan(ctx context.Context, progress func(category string, do
 	for _, r := range env.Roots {
 		e.roots = append(e.roots, r.Path)
 	}
+	e.bases = cleanBases(append(env.Platform.ScratchBases(), env.TempDir))
 	return rowsOf(sum), nil
 }
 
 // Summary implements Deps.
 func (e *EngineDeps) Summary() SummaryData {
-	s := SummaryData{Now: e.now, FreeNow: e.freeNow, Roots: slices.Clone(e.roots)}
+	s := SummaryData{Now: e.now, FreeNow: e.freeNow, Roots: slices.Clone(e.roots), Bases: slices.Clone(e.bases)}
 	s.Home, _ = os.UserHomeDir()
 	if e.now.IsZero() {
 		s.Now = time.Now()
