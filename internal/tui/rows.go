@@ -23,6 +23,7 @@ type Row struct {
 	Updated  time.Time
 	Source   string // one of the Src constants
 	Base     string // the source before the row was excluded; "" means auto
+	Origin   string // the source at scan time; restored when an exclusion is removed ("" = unknown)
 	Category string
 	RuleKey  string
 	Why      string   // why it is a candidate
@@ -51,10 +52,13 @@ func (r Row) origin() string {
 	if r.Source != SrcExcluded {
 		return r.Source
 	}
-	if r.Base == "" {
-		return SrcAuto
+	if r.Base != "" {
+		return r.Base
 	}
-	return r.Base
+	if r.Origin != "" {
+		return r.Origin
+	}
+	return SrcAuto
 }
 
 // selectable reports whether space and `a` may select the row.

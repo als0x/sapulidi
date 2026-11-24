@@ -111,9 +111,15 @@ func exclusionChanged(m Model, c ExclusionChangedMsg) Model {
 			m.Rows[i].Source = SrcExcluded
 			m.Selected = cloneSel(m.Selected)
 			delete(m.Selected, r.Path)
+		} else if !c.Excluded && r.Source == SrcExcluded && r.Base == "" && r.Origin == "" {
+			// the scan gave this row no source: stay dim until a new scan does
+			m.Rows[i].Source = SrcKept
+			m.Rows[i].Why = "exclusion removed; run sapulidi again to refresh the list"
+			m.Status = "exclusion removed: refresh the list by running sapulidi again"
 		} else if !c.Excluded && r.Source == SrcExcluded {
 			m.Rows[i].Source = r.origin()
 			m.Rows[i].Base = ""
+			m.Rows[i].Origin = ""
 		}
 	}
 	return m

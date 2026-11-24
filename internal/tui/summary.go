@@ -138,13 +138,22 @@ func resultOf(s engine.Summary) Result {
 // prune) has no identity to give the engine's Explicit list, so it becomes a dim row that cannot be selected.
 func rowsOf(s engine.Summary) []Row {
 	var rows []Row
+	noOrigin := map[string]bool{}
+	ruleSource := map[string]string{} // a Kept row has no source: it takes the one of its rule's candidates
 	for _, c := range s.WouldRemove {
+		wholesale := c.Path == "" || isWholesale(c)
+		if wholesale {
+			delete(ruleSource, c.RuleKey)
+			noOrigin[c.RuleKey] = true // a wholesale rule's excluded row never becomes selectable
+		} else if !noOrigin[c.RuleKey] {
+			ruleSource[c.RuleKey] = sourceOf(c.Source)
+		}
 		switch {
-		case c.Path == "":
+		case wholesale:
 			rows = append(rows, wholesaleRow(c))
 		default:
 			rows = append(rows, Row{Path: c.Path, Bytes: c.Bytes, Created: c.Created, Updated: c.Updated,
-				Source: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason})
+				Source: sourceOf(c.Source), Origin: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason})
 		}
 	}
 	for _, k := range s.Kept {
@@ -155,6 +164,7 @@ func rowsOf(s engine.Summary) []Row {
 			Why: "kept by a guard: " + k.Why}
 		if k.Why == "excluded" {
 			row.Source, row.Why = SrcExcluded, excludedReason
+			row.Origin = ruleSource[k.RuleKey]
 		}
 		rows = append(rows, row)
 	}
@@ -172,6 +182,16 @@ func sourceOf(s string) string {
 // containersReason is the dim reason of a container, image or builder prune row: the engine has no path to select.
 const containersReason = "removed by the scheduled run or by docker rm / podman rm, never from this screen"
 
+// isWholesale reports a tool command that cleans a whole cache (prune, clean, simctl delete unavailable), whatever
+// Path it reports. Only an uninstall of one exact toolchain version is per-item and stays selectable.
+func isWholesale(c core.Candidate) bool {
+	if c.Removal != core.ToolCommand || len(c.Command) == 0 {
+		return false
+	}
+	// per-item: `rustup toolchain uninstall <name>`; every other shape is wholesale, the safe default
+	return !(len(c.Command) >= 4 && c.Command[0] == "rustup" && c.Command[1] == "toolchain" && c.Command[2] == "uninstall")
+}
+
 func wholesaleRow(c core.Candidate) Row {
 	cmd := strings.Join(c.Command, " ")
 	if cmd == "" {
@@ -181,6 +201,6 @@ func wholesaleRow(c core.Candidate) Row {
 	if c.Category == "containers" {
 		block = containersReason
 	}
-	return Row{Path: cmd, Bytes: c.Bytes, Source: SrcAuto, Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason,
+	return Row{Path: cmd, Bytes: c.Bytes, Source: sourceOf(c.Source), Origin: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason,
 		Block: block}
 }
