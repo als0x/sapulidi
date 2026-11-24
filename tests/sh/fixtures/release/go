@@ -11,6 +11,12 @@ build)
 		[ "$1" != -o ] || out=$2
 		shift
 	done
+	# FAKE_FAIL_BUILD=N makes the Nth build call fail.
+	done_builds=$(grep -c '^build' "$FAKE_LOG")
+	if [ "${FAKE_FAIL_BUILD:-0}" = $((done_builds + 1)) ]; then
+		echo "fake go: build $((done_builds + 1)) fails" >&2
+		exit 1
+	fi
 	launcher=$(sed -n 's/^SAPULIDI_VERSION=//p' bin/sapulidi)
 	manifest=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' .claude-plugin/plugin.json)
 	sums=$(cksum <checksums.txt | tr ' ' :)

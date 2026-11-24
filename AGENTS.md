@@ -27,7 +27,7 @@ and planning notes are kept out of the repository.
 - The never bucket and the deny list are code; no config, pack or proposal can enable them.
 - Every removal of user data goes through `internal/engine`. `os.Remove`/`os.RemoveAll` are allowed only in
   engine, testutil, state, schedule, agent, delivery, install and `_test.go` files. `internal/install` removes only
-  files recorded in its own `agents.json`, through one function.
+  the files recorded in its own `agents.json` and the empty directories that held them, in one function.
 - Builds are reproducible: `-trimpath -buildvcs=false`, `CGO_ENABLED=0`.
 - Output: human text by default; `--json` prints exactly one JSON document. Exit codes: 0 ok, 1 refused or
   failed, 2 usage error.

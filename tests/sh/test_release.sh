@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# scripts/release.sh tests, on a temporary copy of the repository with a fake go first on PATH. The copy is made
-# from HEAD plus the working-tree release.sh, so nothing in the real repository is touched.
+# scripts/release.sh tests, on temporary copies of the working tree (tracked and new files, not ignored ones) with a
+# fake go first on PATH. Nothing in the real repository is touched.
 set -u
 root=$(cd "$(dirname "$0")/../.." && pwd)
 fixture=$root/tests/sh/fixtures/release
@@ -19,28 +19,44 @@ check() { # name, command...
 
 command -v git >/dev/null || { echo "skip: git missing"; exit 0; }
 
-# new_copy <name>: C is a committed copy of the repository with a stub suite, F is a bin dir holding the fake go
+# new_copy <name> [stub]: C is a committed copy of the working tree, F a bin dir holding the fake go. With "stub" the
+# suite (tests/run.sh) is replaced by a stand-in that logs and can be told to fail.
 new_copy() {
 	C=$work/$1
 	F=$work/$1-bin
 	LOG=$work/$1.log
 	mkdir -p "$C" "$F"
-	git -C "$root" archive HEAD | tar -x -C "$C"
-	cp "$root/scripts/release.sh" "$C/scripts/release.sh"
-	cp "$fixture/run.sh" "$C/tests/run.sh"
+	(cd "$root" && git ls-files -co --exclude-standard -z | tar -c --null -T -) | tar -x -C "$C"
 	cp "$fixture/go" "$F/go"
-	chmod +x "$F/go" "$C/tests/run.sh"
+	chmod +x "$F/go"
+	if [ "${2:-}" = stub ]; then
+		cp "$fixture/run.sh" "$C/tests/run.sh"
+		chmod +x "$C/tests/run.sh"
+	fi
 	: >"$LOG"
 	git -C "$C" init -q
 	git -C "$C" add -A
-	git -C "$C" -c user.name=t -c user.email=t@example.invalid commit -q -m copy
+	git -C "$C" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q -m copy
 }
 
-release() { # args...: runs release.sh in the copy with the fake go first on PATH
+release() { # args...: runs release.sh in the copy with the fake go first on PATH; extra environment goes before it
 	(cd "$C" && PATH="$F:$PATH" FAKE_LOG="$LOG" bash scripts/release.sh "$@") >"$work/out.txt" 2>&1
 }
 
-new_copy ok
+# fingerprint of the tracked files release.sh rewrites
+sig() { (cd "$C" && cat bin/sapulidi install.sh checksums.txt .claude-plugin/*.json .codex-plugin/plugin.json .cursor-plugin/plugin.json .antigravity-plugin/plugin.json | cksum); }
+clean() { test -z "$(git -C "$C" status --porcelain)"; }
+
+# The real compiler, offline: is there a local go that can build the copy without the network?
+go_build() { # dir out
+	(cd "$1" && env -u GOFLAGS GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$2" ./cmd/sapulidi) >/dev/null 2>&1
+}
+have_go=0
+new_copy real
+if command -v go >/dev/null && go_build "$C" "$work/before"; then have_go=1; fi
+
+# A full run: every build already sees the bumped files.
+new_copy ok stub
 release 9.8.7; rc=$?
 check "release exits 0" test "$rc" = 0
 check "four builds" test "$(grep -c '^build' "$LOG")" = 4
@@ -54,26 +70,78 @@ check "the suite runs once" test "$(grep -c '^suite' "$LOG")" = 1
 check "install.sh is bumped" grep -q '^SAPULIDI_VERSION=9.8.7$' "$C/install.sh"
 check "the printed plan bumps before it builds" test "$(grep -n 'set SAPULIDI_VERSION' "$work/out.txt" | head -n 1 | cut -d : -f 1)" -lt "$(grep -n 'build into dist' "$work/out.txt" | head -n 1 | cut -d : -f 1)"
 
-new_copy fail
+# The real suites that the stub stood in for must pass on the bumped tree, or a release could never finish.
+(cd "$C" && bash tests/sh/test_install.sh) >"$work/bumped-install.txt" 2>&1; rc=$?
+check "the real test_install.sh passes after the bump" test "$rc" = 0
+[ "$rc" = 0 ] || grep 'not ok' "$work/bumped-install.txt" >&2
+(cd "$C" && bash tests/sh/test_launcher.sh) >"$work/bumped-launcher.txt" 2>&1; rc=$?
+check "the real test_launcher.sh passes after the bump" test "$rc" = 0
+[ "$rc" = 0 ] || grep 'not ok' "$work/bumped-launcher.txt" >&2
+if [ "$have_go" = 1 ]; then
+	(cd "$C" && env -u GOFLAGS GOTOOLCHAIN=local GOPROXY=off go test ./tests -run 'TestManifest|TestInstallScript|TestReleaseScript') >"$work/bumped-go.txt" 2>&1; rc=$?
+	check "the manifest and pin tests pass after the bump" test "$rc" = 0
+else
+	echo "skip: the local go cannot build offline (GOTOOLCHAIN=local, GOPROXY=off); the Go tests were not run on the bumped copy"
+fi
+
+# A failing suite, after checksums.txt was written: everything is put back.
+new_copy suitefail stub
+before=$(sig)
 (cd "$C" && PATH="$F:$PATH" FAKE_LOG="$LOG" FAKE_SUITE_FAIL=1 bash scripts/release.sh 9.8.7) >"$work/out.txt" 2>&1; rc=$?
-check "a failing suite fails the release" test "$rc" = 1
-check "the bumped files are restored" test -z "$(git -C "$C" status --porcelain)"
-check "dist is removed" test ! -e "$C/dist"
+check "a failing suite exits 1" test "$rc" = 1
+check "the suite had the new checksums.txt when it failed" grep -q '^suite checksum_lines=4 ' "$LOG"
+check "after a failing suite the tree is clean" clean
+check "after a failing suite the files are as they were" test "$(sig)" = "$before"
+check "after a failing suite dist is removed" test ! -e "$C/dist"
+
+# A failing build (the third of four): everything is put back, no checksums.txt, no suite.
+new_copy buildfail stub
+before=$(sig)
+(cd "$C" && PATH="$F:$PATH" FAKE_LOG="$LOG" FAKE_FAIL_BUILD=3 bash scripts/release.sh 9.8.7) >"$work/out.txt" 2>&1; rc=$?
+check "a failing build exits 1" test "$rc" = 1
+check "two builds ran before the failure" test "$(grep -c '^build' "$LOG")" = 2
+check "the suite did not run after a failing build" test "$(grep -c '^suite' "$LOG")" = 0
+check "after a failing build the tree is clean" clean
+check "after a failing build the files are as they were" test "$(sig)" = "$before"
+check "after a failing build dist is removed" test ! -e "$C/dist"
+
+# A start with a modified file, an untracked file or an existing dist/ is refused and nothing is touched.
+new_copy dirty stub
+echo "# edit" >>"$C/install.sh"
+before=$(sig)
+release 9.8.7; rc=$?
+check "a modified file is refused with exit 1" test "$rc" = 1
+check "a modified file: nothing built" test "$(grep -c '^build' "$LOG")" = 0
+check "a modified file is left as it was" test "$(sig)" = "$before"
+check "a modified file: the refusal says why" grep -q 'not clean' "$work/out.txt"
+
+new_copy untracked stub
+echo mine >"$C/stray.txt"
+before=$(sig)
+release 9.8.7; rc=$?
+check "an untracked file is refused with exit 1" test "$rc" = 1
+check "an untracked file: nothing built" test "$(grep -c '^build' "$LOG")" = 0
+check "an untracked file is left as it was" test "$(cat "$C/stray.txt")" = mine -a "$(sig)" = "$before"
+
+new_copy hasdist stub
+mkdir "$C/dist"
+echo mine >"$C/dist/keep.txt"
+before=$(sig)
+release 9.8.7; rc=$?
+check "an existing dist/ is refused with exit 1" test "$rc" = 1
+check "an existing dist/ is not deleted" test "$(cat "$C/dist/keep.txt")" = mine
+check "an existing dist/: nothing built" test "$(grep -c '^build' "$LOG")" = 0
+check "an existing dist/: the files are as they were" test "$(sig)" = "$before"
 
 # The reason for the order: the binary embeds the manifests, so a version bump changes its bytes.
-if command -v go >/dev/null; then
-	new_copy real
-	build() { (cd "$C" && env -u GOFLAGS CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$1" ./cmd/sapulidi) >/dev/null 2>&1; }
-	if build "$work/before"; then
-		sed 's/"version": "[^"]*"/"version": "9.8.7"/' "$C/.claude-plugin/plugin.json" >"$work/plugin.json"
-		cat "$work/plugin.json" >"$C/.claude-plugin/plugin.json"
-		build "$work/after"
-		check "a plugin.json version change changes the binary" test "$(cksum <"$work/before")" != "$(cksum <"$work/after")"
-	else
-		echo "skip: go build failed in the copy"
-	fi
+if [ "$have_go" = 1 ]; then
+	C=$work/real
+	sed 's/"version": "[^"]*"/"version": "9.8.7"/' "$C/.claude-plugin/plugin.json" >"$work/plugin.json"
+	cat "$work/plugin.json" >"$C/.claude-plugin/plugin.json"
+	go_build "$C" "$work/after"
+	check "a plugin.json version change changes the binary" test "$(cksum <"$work/before")" != "$(cksum <"$work/after")"
 else
-	echo "skip: go missing"
+	echo "skip: the local go cannot build offline (GOTOOLCHAIN=local, GOPROXY=off); the reproducibility check was not run"
 fi
 
 echo "$n checks, $fails failed"

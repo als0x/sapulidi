@@ -16,6 +16,11 @@ check() { # name, command...
 	if "$@"; then ok "$name"; else bad "$name"; fi
 }
 
+# The pinned version comes from the launcher, so the suite also passes after scripts/release.sh bumped it.
+# N1 and N2 are arbitrary versions above any pin, for the "current moves forward" checks.
+V=$(sed -n 's/^SAPULIDI_VERSION=//p' "$root/bin/sapulidi")
+N1=98.2.0 N2=98.10.0
+
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d ' ' -f 1; }
 
 # new_env <name> [uname_s] [uname_m] [tools...]: sets T (test dir), P (private PATH), L (launcher), REL (release dir)
@@ -42,7 +47,7 @@ new_env() {
 
 # publish <asset-suffix>: put the fake binary in REL and write a matching checksums.txt next to the launcher
 publish() {
-	local asset=sapulidi_0.1.0_$1
+	local asset=sapulidi_${V}_$1
 	cp "$fixture/sapulidi" "$REL/$asset"
 	printf '%s  %s\n' "$(sha "$REL/$asset")" "$asset" >"$T/launcher/checksums.txt"
 }
@@ -54,16 +59,16 @@ run() { # runs the launcher with the private PATH
 command -v curl >/dev/null || { echo "skip: curl missing"; exit 0; }
 check "sh -n" sh -n "$root/bin/sapulidi"
 if command -v shellcheck >/dev/null; then check "shellcheck" shellcheck -s sh "$root/bin/sapulidi"; fi
-check "checksums.txt has one SHA-256 line per target" test "$(grep -c '^[0-9a-f]\{64\}  sapulidi_0\.1\.0_\(darwin\|linux\)_\(arm64\|amd64\)$' "$root/checksums.txt")" = 4
+check "checksums.txt has one SHA-256 line per target" test "$(grep -c "^[0-9a-f]\{64\}  sapulidi_${V//./\\.}_\(darwin\|linux\)_\(arm64\|amd64\)\$" "$root/checksums.txt")" = 4
 
 # download, verify, install, exec
 new_env t1
 publish linux_amd64
 out=$(run sh "$L" a "b c"); rc=$?
 check "downloads and execs" test "$rc" = 0 -a "$out" = "fake sapulidi a b c"
-check "installed 0755" test -x "$T/data/bin/0.1.0/sapulidi"
-check "current symlink" test "$(readlink "$T/data/bin/current")" = 0.1.0
-check "no temp or lock left" test -z "$(ls -A "$T/data/bin/0.1.0" | grep -v '^sapulidi$')" -a ! -d "$T/data/bin/.lock"
+check "installed 0755" test -x "$T/data/bin/$V/sapulidi"
+check "current symlink" test "$(readlink "$T/data/bin/current")" = "$V"
+check "no temp or lock left" test -z "$(ls -A "$T/data/bin/$V" | grep -v '^sapulidi$')" -a ! -d "$T/data/bin/.lock"
 
 # second call does not download
 rm -rf "$REL"/*
@@ -72,22 +77,22 @@ check "second call needs no download" test "$rc" = 0 -a "$out" = "fake sapulidi 
 
 # --sapulidi-path
 out=$(run sh "$L" --sapulidi-path)
-check "--sapulidi-path" test "$out" = "$T/data/bin/0.1.0/sapulidi"
+check "--sapulidi-path" test "$out" = "$T/data/bin/$V/sapulidi"
 
 # --sapulidi-path still downloads when missing
 new_env t1b
 publish linux_amd64
 out=$(run sh "$L" --sapulidi-path)
-check "--sapulidi-path downloads when missing" test "$out" = "$T/data/bin/0.1.0/sapulidi" -a -x "$T/data/bin/0.1.0/sapulidi"
+check "--sapulidi-path downloads when missing" test "$out" = "$T/data/bin/$V/sapulidi" -a -x "$T/data/bin/$V/sapulidi"
 
 # checksum mismatch
 new_env t2
 publish linux_amd64
-echo tampered >>"$REL/sapulidi_0.1.0_linux_amd64"
+echo tampered >>"$REL/sapulidi_${V}_linux_amd64"
 out=$(run sh "$L" 2>&1); rc=$?
 check "mismatch exits 3" test "$rc" = 3
 check "mismatch message" grep -q 'checksum mismatch' <<<"$out"
-check "mismatch leaves no file" test -z "$(ls -A "$T/data/bin/0.1.0" 2>/dev/null)"
+check "mismatch leaves no file" test -z "$(ls -A "$T/data/bin/$V" 2>/dev/null)"
 
 # missing checksum line
 new_env t3
@@ -95,7 +100,7 @@ publish linux_amd64
 : >"$T/launcher/checksums.txt"
 out=$(run sh "$L" 2>&1); rc=$?
 check "missing checksum line exits 3" test "$rc" = 3
-check "missing checksum leaves no file" test -z "$(ls -A "$T/data/bin/0.1.0" 2>/dev/null)"
+check "missing checksum leaves no file" test -z "$(ls -A "$T/data/bin/$V" 2>/dev/null)"
 
 # download failure
 new_env t3b
@@ -111,7 +116,7 @@ publish linux_amd64
 rm -f "$P/curl"
 out=$(run sh "$L" 2>&1); rc=$?
 check "no tool exits 3" test "$rc" = 3
-check "no tool prints manual command" grep -q 'need curl or wget.*sapulidi_0.1.0_linux_amd64' <<<"$out"
+check "no tool prints manual command" grep -q "need curl or wget.*sapulidi_${V}_linux_amd64" <<<"$out"
 
 # uname mapping and unknown OS
 new_env t5 Linux aarch64
@@ -129,18 +134,18 @@ check "unknown OS exits 1" test "$rc" = 1
 # bin/current moves forward only
 new_env t7
 publish linux_amd64
-mkdir -p "$T/data/bin/0.2.0"
-cp "$fixture/sapulidi" "$T/data/bin/0.2.0/sapulidi"; chmod +x "$T/data/bin/0.2.0/sapulidi"
-ln -s 0.1.0 "$T/data/bin/current"
-mkdir -p "$T/data/bin/0.1.0"; cp "$fixture/sapulidi" "$T/data/bin/0.1.0/sapulidi"; chmod +x "$T/data/bin/0.1.0/sapulidi"
+mkdir -p "$T/data/bin/$N1"
+cp "$fixture/sapulidi" "$T/data/bin/$N1/sapulidi"; chmod +x "$T/data/bin/$N1/sapulidi"
+ln -s "$V" "$T/data/bin/current"
+mkdir -p "$T/data/bin/$V"; cp "$fixture/sapulidi" "$T/data/bin/$V/sapulidi"; chmod +x "$T/data/bin/$V/sapulidi"
 run sh "$L" >/dev/null
-check "current moves 0.1.0 -> 0.2.0" test "$(readlink "$T/data/bin/current")" = 0.2.0
-mkdir -p "$T/data/bin/0.10.0"; cp "$fixture/sapulidi" "$T/data/bin/0.10.0/sapulidi"; chmod +x "$T/data/bin/0.10.0/sapulidi"
+check "current moves $V -> $N1" test "$(readlink "$T/data/bin/current")" = "$N1"
+mkdir -p "$T/data/bin/$N2"; cp "$fixture/sapulidi" "$T/data/bin/$N2/sapulidi"; chmod +x "$T/data/bin/$N2/sapulidi"
 run sh "$L" >/dev/null
-check "versions compare numerically (0.10.0 > 0.2.0)" test "$(readlink "$T/data/bin/current")" = 0.10.0
-rm -rf "$T/data/bin/0.10.0"
+check "versions compare numerically ($N2 > $N1)" test "$(readlink "$T/data/bin/current")" = "$N2"
+rm -rf "$T/data/bin/$N2"
 run sh "$L" >/dev/null
-check "current is not moved back" test "$(readlink "$T/data/bin/current")" = 0.2.0
+check "current is not moved back" test "$(readlink "$T/data/bin/current")" = "$N1"
 
 # concurrent start: one download
 new_env t8
@@ -190,18 +195,18 @@ new_env t12
 publish linux_amd64
 run env SAPULIDI_DATA="$T/fresh/data" sh -c 'umask 000; exec sh "$0"' "$L" >/dev/null 2>&1
 perms_ok=1
-for d in "$T/fresh/data" "$T/fresh/data/bin" "$T/fresh/data/bin/0.1.0"; do
+for d in "$T/fresh/data" "$T/fresh/data/bin" "$T/fresh/data/bin/$V"; do
 	m=$(ls -ld "$d" | cut -c1-10)
 	case $m in d????-??-?) ;; *) perms_ok=0 ;; esac
 done
-check "umask 000 leaves data dirs not group/world writable" test "$perms_ok" = 1 -a -x "$T/fresh/data/bin/0.1.0/sapulidi"
+check "umask 000 leaves data dirs not group/world writable" test "$perms_ok" = 1 -a -x "$T/fresh/data/bin/$V/sapulidi"
 
 # a planted symlink at the temp name is not written through
 new_env t13
 publish linux_amd64
-mkdir -p "$T/data/bin/0.1.0"
+mkdir -p "$T/data/bin/$V"
 echo keep >"$T/victim"
-ln -s "$T/victim" "$T/data/bin/0.1.0/.download"
+ln -s "$T/victim" "$T/data/bin/$V/.download"
 out=$(run sh "$L" p); rc=$?
 check "planted temp symlink not written through" test "$rc" = 0 -a "$(cat "$T/victim")" = keep -a "$out" = "fake sapulidi p"
 
@@ -209,7 +214,7 @@ check "planted temp symlink not written through" test "$rc" = 0 -a "$(cat "$T/vi
 new_env t14
 publish linux_amd64
 mkdir -p "$T/data/bin" "$T/elsewhere"
-ln -s "$T/elsewhere" "$T/data/bin/0.1.0"
+ln -s "$T/elsewhere" "$T/data/bin/$V"
 out=$(run sh "$L" 2>&1); rc=$?
 check "symlinked version dir refused" test "$rc" = 3 -a -z "$(ls -A "$T/elsewhere")"
 
