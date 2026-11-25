@@ -122,6 +122,25 @@ update_current() {
 	return 0
 }
 
+# Record that the plugin installed a binary, so the update notice can name the plugin's update command. Best
+# effort: a failure is reported and changes nothing else.
+mark_route() {
+	if [ -n "${SAPULIDI_STATE:-}" ]; then
+		state=$SAPULIDI_STATE
+	elif [ -n "${XDG_STATE_HOME:-}" ]; then
+		state=$XDG_STATE_HOME/sapulidi
+	else
+		state=${HOME:-}/.local/state/sapulidi
+		[ -n "${HOME:-}" ] || state=
+	fi
+	marker=$state/installed-by/plugin
+	# The old marker is removed first, so a planted symlink is never written through.
+	case $state in
+	/*) (umask 077 && mkdir -p "$state/installed-by" && rm -f "$marker" && : >"$marker") 2>/dev/null && return 0 ;;
+	esac
+	echo "sapulidi: note: could not record the install route in the state directory $state" >&2
+}
+
 if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
 	oldumask=$(umask)
 	umask 077
@@ -146,6 +165,7 @@ if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
 		if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
 			install_binary
 			umask "$oldumask"
+			mark_route
 		fi
 		rmdir "$lock" 2>/dev/null
 		locked=0

@@ -150,6 +150,14 @@ main() {
 	[ "$cur" = "$SAPULIDI_VERSION" ] || say "current points at $cur, newer than $SAPULIDI_VERSION; $cur will run"
 	mkdir -p "$HOME/.local/bin" && rm -f "$link" && ln -s "$bindir/current/sapulidi" "$link" || die 1 "cannot link $link"
 
+	# The update notice reads this marker. Best effort; the old one is removed first, never written through.
+	state=${SAPULIDI_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/sapulidi}
+	marker=$state/installed-by/install.sh
+	case $state in
+	/*) (umask 077 && mkdir -p "$state/installed-by" && rm -f "$marker" && : >"$marker") 2>/dev/null ;;
+	*) false ;;
+	esac || say "note: could not record the install route in the state directory $state"
+
 	say "installed $bin (version $SAPULIDI_VERSION), linked as $link"
 	case ":${PATH:-}:" in
 	*":$HOME/.local/bin:"*) ;;

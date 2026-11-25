@@ -41,6 +41,9 @@ type AgentConf struct {
 
 type NotifyConf struct{ Enabled bool }
 
+// UpdateConf: Check allows asking whether a newer release exists; Auto lets the schedule install it.
+type UpdateConf struct{ Check, Auto bool }
+
 type Config struct {
 	Roots           []string
 	LowDiskGB       int
@@ -50,6 +53,7 @@ type Config struct {
 	Agent           AgentConf
 	Notify          NotifyConf
 	Schedule        ScheduleConf
+	Update          UpdateConf
 
 	// Invalid lists config files that exist but are not valid TOML. NewSettings fails closed on such a config:
 	// nothing is enabled and nothing is consented until the file is fixed.
@@ -68,6 +72,7 @@ func Defaults() *Config {
 		Agent:           AgentConf{CLI: "", Interval: Duration(7 * 24 * time.Hour), MaxUSD: 0.25},
 		Notify:          NotifyConf{Enabled: false},
 		Schedule:        ScheduleConf{Interval: DefaultScheduleInterval},
+		Update:          UpdateConf{Check: true},
 		sources:         map[string]string{},
 	}
 }
@@ -285,6 +290,27 @@ func (c *Config) merge(raw map[string]any, src string) []string {
 					c.Notify.Enabled, c.sources[key] = b, src
 				}
 			}
+		case "update":
+			t, ok := table(k, v)
+			if !ok {
+				continue
+			}
+			for _, f := range sortedKeys(t) {
+				key := "update." + f
+				var dst *bool
+				switch f {
+				case "check":
+					dst = &c.Update.Check
+				case "auto":
+					dst = &c.Update.Auto
+				default:
+					unknown(key)
+					continue
+				}
+				if b, ok := asBool(key, t[f]); ok {
+					*dst, c.sources[key] = b, src
+				}
+			}
 		case "schedule":
 			t, ok := table(k, v)
 			if !ok {
@@ -338,6 +364,8 @@ func (c *Config) Effective() []Value {
 		{"agent.max_usd", strconv.FormatFloat(c.Agent.MaxUSD, 'f', -1, 64), src("agent.max_usd")},
 		{"notify.enabled", strconv.FormatBool(c.Notify.Enabled), src("notify.enabled")},
 		{"schedule.interval", FormatInterval(c.Schedule.Interval), src("schedule.interval")},
+		{"update.auto", strconv.FormatBool(c.Update.Auto), src("update.auto")},
+		{"update.check", strconv.FormatBool(c.Update.Check), src("update.check")},
 	}
 	for n, cc := range c.Categories {
 		if cc.Enabled != nil {

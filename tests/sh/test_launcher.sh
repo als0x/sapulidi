@@ -226,5 +226,41 @@ check "empty HOME exits 1" test "$rc" = 1
 out=$(run env SAPULIDI_DATA=rel/data sh "$L" 2>&1); rc=$?
 check "relative SAPULIDI_DATA exits 1" test "$rc" = 1
 
+# the install route is recorded in the state directory after a verified install
+new_env t16
+publish linux_amd64
+run sh "$L" >/dev/null
+default_state=.local/state/sapulidi # under the HOME that run() sets
+H=$T/home
+check "marker in the default state dir" test -f "$H/$default_state/installed-by/plugin"
+check "state dir is private" test "$(ls -ld "$H/$default_state" | cut -c1-10)" = drwx------
+new_env t16b
+publish linux_amd64
+run env XDG_STATE_HOME="$T/xdg" sh "$L" >/dev/null
+check "marker under XDG_STATE_HOME" test -f "$T/xdg/sapulidi/installed-by/plugin"
+new_env t16c
+publish linux_amd64
+mkdir -p "$T/state/installed-by"
+echo keep >"$T/victim"
+ln -s "$T/victim" "$T/state/installed-by/plugin"
+run env SAPULIDI_STATE="$T/state" XDG_STATE_HOME="$T/xdg" sh "$L" >/dev/null
+check "marker under SAPULIDI_STATE, not through a planted symlink" \
+	test -f "$T/state/installed-by/plugin" -a ! -L "$T/state/installed-by/plugin" -a "$(cat "$T/victim")" = keep -a ! -e "$T/xdg"
+new_env t16d
+publish linux_amd64
+echo tampered >>"$REL/sapulidi_${V}_linux_amd64"
+run sh "$L" >/dev/null 2>&1
+check "no marker after a failed install" test ! -e "$T/home/$default_state/installed-by/plugin"
+new_env t16e
+publish linux_amd64
+mkdir -p "$T/state"
+chmod 500 "$T/state"
+out=$(run env SAPULIDI_STATE="$T/state" sh "$L" ro 2>"$T/err"); rc=$?
+chmod 700 "$T/state"
+check "read-only state dir does not fail the install" test "$rc" = 0 -a "$out" = "fake sapulidi ro"
+if [ "$(id -u)" != 0 ]; then
+	check "read-only state dir is reported" grep -q 'could not record the install route' "$T/err"
+fi
+
 echo "$n checks, $fails failed"
 [ "$fails" = 0 ]
