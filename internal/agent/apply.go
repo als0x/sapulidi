@@ -40,8 +40,9 @@ var errNeedYes = errors.New("this changes your setup: run it again with --yes af
 
 // Apply carries out one proposal. The proposal is validated again first: the file may have been edited. Config
 // changes go through config.Apply, a rule becomes a user pack after the terminal tier, and clean-once runs the
-// engine, so every guard still decides (spec S1, S14, S15). Approving a proposal is also the user's consent for the
-// rules it enables; that is recorded only after a terminal confirmation, never on --yes alone.
+// engine, so every guard still decides (spec S1, S14, S15). Approving a proposal that enables a rule or a category
+// is also the user's consent for those rules; it is recorded only after a terminal confirmation, never on --yes
+// alone. Clean-once records nothing.
 func Apply(d ApplyDeps, p Proposal) (ApplyResult, error) {
 	if err := Validate(p); err != nil {
 		return ApplyResult{}, fmt.Errorf("proposal %s is not valid: %w", p.ID, err)
@@ -168,15 +169,23 @@ func consentRecord(paths config.Paths) (*state.Consent, error) {
 	return st.Consent()
 }
 
+// validConfig fails while a config file is corrupt.
+func validConfig(paths config.Paths) error {
+	cfg, _, err := config.Load(paths.Config)
+	if err != nil {
+		return err
+	}
+	if len(cfg.Invalid) > 0 {
+		return fmt.Errorf("%s is not valid TOML", cfg.Invalid[0])
+	}
+	return nil
+}
+
 // recordConsent adds keys to the consent record. It never creates the record (false: setup never ran) and refuses
 // while a config file is corrupt.
 func recordConsent(paths config.Paths, keys []string) (bool, error) {
-	cfg, _, err := config.Load(paths.Config)
-	if err != nil {
+	if err := validConfig(paths); err != nil {
 		return false, err
-	}
-	if len(cfg.Invalid) > 0 {
-		return false, fmt.Errorf("%s is not valid TOML", cfg.Invalid[0])
 	}
 	st, err := state.Open(paths)
 	if err != nil {
@@ -196,7 +205,7 @@ func recordConsent(paths config.Paths, keys []string) (bool, error) {
 	return true, nil
 }
 
-// allowed is core.Settings plus the rule keys the user consented to after the Env was built.
+// allowed is core.Settings plus the rule keys the user allowed for one run.
 type allowed struct {
 	core.Settings
 	keys []string
@@ -206,8 +215,8 @@ func (a allowed) Consented(key string) bool {
 	return slices.Contains(a.keys, key) || a.Settings.Consented(key)
 }
 
-// allowCleanOnce makes sure the rules of the listed paths are consented: for those that are not, the user confirms on
-// the terminal and the consent is recorded. It returns the Env the run must use.
+// allowCleanOnce asks on the terminal when rules of the listed paths are not consented. The answer covers the one run
+// that opt limits to those paths: it returns the Env for that run, and nothing is recorded.
 func allowCleanOnce(d ApplyDeps, p Proposal, opt engine.Options) (*core.Env, error) {
 	consent, err := d.Store.Consent()
 	if err != nil || consent == nil || d.Store.Paused() {
@@ -224,14 +233,13 @@ func allowCleanOnce(d ApplyDeps, p Proposal, opt engine.Options) (*core.Env, err
 	if len(keys) == 0 {
 		return d.Env, nil
 	}
-	slices.Sort(keys)
-	keys = slices.Compact(keys)
-	prompt := fmt.Sprintf("Proposal %s removes these paths:\n\n%s\nIt also lets scheduled runs remove what these rules "+
-		"find from now on: %s\nType allow to confirm: ", p.ID, lines.String(), strings.Join(keys, ", "))
-	if err := confirm.Terminal(prompt, "allow"); err != nil {
+	// The wrapper below would override the "nothing is consented" of a corrupt config.
+	if err := validConfig(d.Paths); err != nil {
 		return nil, err
 	}
-	if _, err := recordConsent(d.Paths, keys); err != nil {
+	prompt := fmt.Sprintf("Proposal %s removes these paths, which you have not allowed yet:\n\n%s\n"+
+		"This allows them once; scheduled runs get no new permission.\nType allow to confirm: ", p.ID, lines.String())
+	if err := confirm.Terminal(prompt, "allow"); err != nil {
 		return nil, err
 	}
 	env := *d.Env

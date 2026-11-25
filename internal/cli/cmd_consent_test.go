@@ -211,6 +211,57 @@ func TestConsentYesKeyThatDoesNotWait(t *testing.T) {
 	}
 }
 
+func TestConsentJSONListsConfirmed(t *testing.T) {
+	consentFixture(t, "", []string{})
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{nil, []string{}},
+		{[]string{"--yes"}, []string{safeKey}},
+		{[]string{"--yes", recKey}, []string{recKey}},
+	} {
+		code, out, e := runCLI(t, append([]string{"consent", "--json"}, tc.args...)...)
+		var doc map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
+			t.Fatalf("%v: %d %q %q %v", tc.args, code, out, e, err)
+		}
+		var confirmed []string
+		if err := json.Unmarshal(doc["confirmed"], &confirmed); err != nil || confirmed == nil || !slices.Equal(confirmed, tc.want) {
+			t.Errorf("%v: confirmed %s, want %v", tc.args, doc["confirmed"], tc.want)
+		}
+		for _, k := range []string{"waiting", "labels", "recorded"} {
+			if _, ok := doc[k]; !ok {
+				t.Errorf("%v: field %q is gone", tc.args, k)
+			}
+		}
+	}
+}
+
+func TestConsentCorruptConfigRefuses(t *testing.T) {
+	st := consentFixture(t, "low_disk_gb = [", []string{safeKey})
+	withTerminal(t, true, "allow\n")
+	for _, args := range [][]string{{"--yes"}, {"--yes", "--recommended"}, {"--yes", callKey}, {"--revoke", safeKey},
+		{"--revoke", "recommended"}} {
+		withTerminal(t, true, "revoke\n")
+		code, out, e := runCLI(t, append([]string{"consent"}, args...)...)
+		if code != 1 || !strings.Contains(e, "not valid TOML") || strings.Contains(out, "consent re") {
+			t.Errorf("%v: %d %q %q", args, code, out, e)
+		}
+	}
+	if got := consentedKeys(t, st); !slices.Equal(got, []string{safeKey}) {
+		t.Fatalf("a corrupt config changed consent: %v", got)
+	}
+	code, out, _ := runCLI(t, "consent")
+	if code != 0 || !strings.Contains(out, "not valid TOML") || strings.Contains(out, recKey) ||
+		strings.Contains(out, "no rules are waiting") {
+		t.Fatalf("listing: %d %q", code, out)
+	}
+	if waiting, _ := consentJSON(t); len(waiting) != 0 {
+		t.Fatalf("%v", waiting)
+	}
+}
+
 func TestConsentRevokeKey(t *testing.T) {
 	st := consentFixture(t, "", []string{recKey, safeKey})
 

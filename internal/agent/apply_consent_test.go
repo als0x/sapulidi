@@ -13,6 +13,7 @@ import (
 	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/confirm"
 	"github.com/als0x/sapulidi/internal/core"
+	"github.com/als0x/sapulidi/internal/engine"
 	packsload "github.com/als0x/sapulidi/internal/packs"
 	"github.com/als0x/sapulidi/internal/state"
 	"github.com/als0x/sapulidi/internal/testutil"
@@ -114,10 +115,12 @@ func TestApplyEnableCategoryConsentNeedsTerminal(t *testing.T) {
 	}
 }
 
-func TestApplyCleanOnceConsentNeedsTerminal(t *testing.T) {
-	f := newFix(t)
+// cleanOnceFix is one old candidate of a "your call" rule with a clean-once proposal for it.
+func cleanOnceFix(t *testing.T) (f *fix, old string, d ApplyDeps, p Proposal) {
+	t.Helper()
+	f = newFix(t)
 	tmp := filepath.Join(f.home, "tmp")
-	old := filepath.Join(tmp, "old")
+	old = filepath.Join(tmp, "old")
 	testutil.Touch(t, filepath.Join(old, "data.bin"), 72*time.Hour)
 	testutil.Touch(t, old, 72*time.Hour)
 	f.record()
@@ -132,8 +135,13 @@ func TestApplyCleanOnceConsentNeedsTerminal(t *testing.T) {
 		Settings: config.NewSettings(config.Defaults(), &config.Consent{}, map[string]core.Bucket{"deps": core.Optional}),
 		Rules:    []core.Rule{{Pack: "x", ID: "deps", Rev: 1, Category: "deps", Bucket: core.Optional, Kind: core.KindProject, MinAge: 24 * time.Hour}},
 	}
-	p := Proposal{ID: "p1", Kind: "clean-once", Target: "deps", Reason: "r", Paths: []string{old}}
-	d := ApplyDeps{Paths: f.paths, Yes: true, Env: env, Cats: []core.Category{cat}, Store: f.st}
+	p = Proposal{ID: "p1", Kind: "clean-once", Target: "deps", Reason: "r", Paths: []string{old}}
+	d = ApplyDeps{Paths: f.paths, Yes: true, Env: env, Cats: []core.Category{cat}, Store: f.st}
+	return f, old, d, p
+}
+
+func TestApplyCleanOnceNeedsTerminalForUnconsentedRule(t *testing.T) {
+	f, old, d, p := cleanOnceFix(t)
 
 	withoutTTY(t)
 	if _, err := Apply(d, p); !errors.Is(err, confirm.ErrNoTerminal) {
@@ -151,12 +159,41 @@ func TestApplyCleanOnceConsentNeedsTerminal(t *testing.T) {
 	if err != nil || !slices.Equal(res.Removed, []string{old}) {
 		t.Fatalf("%+v %v", res, err)
 	}
-	if !slices.Equal(f.consented(), []string{"x/deps@1"}) {
-		t.Fatalf("%v", f.consented())
-	}
-	for _, want := range []string{old, "x/deps@1", "schedule"} {
+	for _, want := range []string{old, "x/deps@1", "once"} {
 		if !strings.Contains(tty.out.String(), want) {
 			t.Errorf("the prompt does not show %q:\n%s", want, tty.out.String())
 		}
+	}
+	// the "allow" covered those paths once: no consent stays, and a scheduled run leaves the rule alone
+	if got := f.consented(); len(got) != 0 {
+		t.Fatalf("clean-once recorded %v", got)
+	}
+	testutil.Touch(t, filepath.Join(old, "data.bin"), 72*time.Hour)
+	testutil.Touch(t, old, 72*time.Hour)
+	d.Env.Settings = config.NewSettings(config.Defaults(), &config.Consent{Rules: f.consented()},
+		map[string]core.Bucket{"deps": core.Optional})
+	sum, err := engine.Run(d.Env, d.Cats, f.st, engine.Options{Trigger: "schedule"})
+	if err != nil || len(sum.Removed) != 0 || len(sum.WouldRemove) != 1 {
+		t.Fatalf("scheduled run: %+v %v", sum, err)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatal("the scheduled run removed it")
+	}
+}
+
+func TestApplyCleanOnceRefusesCorruptConfig(t *testing.T) {
+	f, old, d, p := cleanOnceFix(t)
+	if err := os.MkdirAll(filepath.Dir(f.paths.Config), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.paths.Config, []byte("low_disk_gb = ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tty := withTTY(t, "allow\n")
+	if _, err := Apply(d, p); err == nil || !strings.Contains(err.Error(), "not valid TOML") {
+		t.Fatalf("err %v", err)
+	}
+	if _, err := os.Stat(old); err != nil || tty.out.Len() != 0 {
+		t.Fatalf("asked or removed under a corrupt config: %v %q", err, tty.out.String())
 	}
 }

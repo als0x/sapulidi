@@ -59,13 +59,27 @@ func runConsent(app *App, args []string) int {
 	if consent == nil {
 		return fail(app, "consent", errors.New("not set up yet: run sapulidi setup first"))
 	}
-	rules, _ := consentRules(paths)
-	if revoking {
-		return revokeConsent(app, st, rules, *revoke)
-	}
 	cfg, _, err := config.Load(paths.Config)
 	if err != nil {
 		return fail(app, "consent", err)
+	}
+	// A corrupt config trusts no consent, so none is changed and nothing is offered.
+	if len(cfg.Invalid) > 0 {
+		msg := invalidConfigMessage(cfg.Invalid[0])
+		if *yes || revoking {
+			return fail(app, "consent", errors.New(msg))
+		}
+		if app.JSON {
+			writeJSON(app.Stdout, map[string]any{"waiting": []string{}, "labels": map[string]core.Label{},
+				"recorded": false, "confirmed": []string{}, "invalid_config": cfg.Invalid})
+		} else {
+			fmt.Fprintln(app.Stdout, msg)
+		}
+		return 0
+	}
+	rules, _ := consentRules(paths)
+	if revoking {
+		return revokeConsent(app, st, rules, *revoke)
 	}
 	waiting := waitingRules(rules, consent, cfg)
 
@@ -126,7 +140,8 @@ func runConsent(app *App, args []string) int {
 			keys = append(keys, w.key)
 			labels[w.key] = w.label
 		}
-		writeJSON(app.Stdout, map[string]any{"waiting": keys, "labels": labels, "recorded": len(confirmed) > 0})
+		writeJSON(app.Stdout, map[string]any{"waiting": keys, "labels": labels, "recorded": len(confirmed) > 0,
+			"confirmed": nonNil(confirmed)})
 		return 0
 	}
 	if len(confirmed) > 0 {

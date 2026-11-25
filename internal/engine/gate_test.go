@@ -125,6 +125,47 @@ func TestLabelsInPlanAndQuickRun(t *testing.T) {
 	}
 }
 
+func TestWaitingNoticeNamesTheCommand(t *testing.T) {
+	const setup, rec = "sapulidi setup", "sapulidi consent --yes --recommended"
+	for name, tc := range map[string]struct {
+		safe, recommended bool
+		want              string
+	}{
+		"safe":        {safe: true, want: "1 rule(s) wait for your confirmation: run " + setup + "."},
+		"recommended": {recommended: true, want: "1 rule(s) wait for your confirmation: run " + rec + "."},
+		"both": {safe: true, recommended: true,
+			want: "2 rule(s) wait for your confirmation: run " + setup + " and " + rec + "."},
+		"your call only": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFix(t)
+			f.set.Notify, f.set.ConsentAll = true, false
+			var cats []core.Category
+			if tc.safe {
+				cats = append(cats, f.cat("temp", core.Auto, f.cand(f.mk("a"))))
+			}
+			// deps is recommended in the "recommended" cases; worktrees is always a your-call rule here
+			f.env.Rules[1].Recommend = true
+			if tc.recommended {
+				c := f.cand(f.mk("d"))
+				c.Category, c.RuleKey = "deps", "x/deps@1"
+				cats = append(cats, f.cat("deps", core.Optional, c))
+			}
+			w := f.cand(f.mk("w"))
+			w.Category, w.RuleKey = "worktrees", "x/wt@1"
+			cats = append(cats, f.cat("worktrees", core.Optional, w))
+			f.do(Options{}, cats...)
+			var want []string
+			if tc.want != "" {
+				want = []string{"sapulidi: " + tc.want}
+			}
+			if !slices.Equal(f.plat.Notifications, want) {
+				t.Fatalf("notifications %q, want %q", f.plat.Notifications, want)
+			}
+		})
+	}
+}
+
 func TestLabelWords(t *testing.T) {
 	for l, want := range map[core.Label]string{
 		core.LabelSafe: "safe", core.LabelRecommended: "recommended",

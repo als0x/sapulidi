@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,10 +121,10 @@ type runner struct {
 	showOff     bool            // Plan with ShowOptionalOff
 	sum         *Summary
 	sink        *factSink
-	dry         bool // every candidate is a dry run
-	gate        bool // consent gating applies (false before setup: everything is dry anyway)
-	recorded    bool // a consent record exists; without one only IncludeRecommended allows a removal
-	waiting     map[string]bool
+	dry         bool                  // every candidate is a dry run
+	gate        bool                  // consent gating applies (false before setup: everything is dry anyway)
+	recorded    bool                  // a consent record exists; without one only IncludeRecommended allows a removal
+	waiting     map[string]core.Label // rule key to label
 	logged      bool
 
 	paused    func() bool // reads the pause file; nil when there is no store (Plan)
@@ -136,7 +138,7 @@ func newRunner(env *core.Env, opt Options, ctx context.Context, sum *Summary) *r
 	sink := &factSink{}
 	e.Facts = sink
 	r := &runner{env: &e, opt: opt, sum: sum, sink: sink,
-		rules: map[string]core.Rule{}, cats: map[string]core.Category{}, waiting: map[string]bool{}}
+		rules: map[string]core.Rule{}, cats: map[string]core.Category{}, waiting: map[string]core.Label{}}
 	for _, ru := range env.Rules {
 		r.rules[ru.Key()] = ru
 	}
@@ -344,7 +346,7 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 	dry := r.dry
 	if r.gate && !r.explicit && !r.consented(rule) {
 		if c.Label != core.LabelYourCall { // waiting is what setup and consent --yes can confirm
-			r.waiting[c.RuleKey] = true
+			r.waiting[c.RuleKey] = c.Label
 		}
 		dry = true
 	}
@@ -510,6 +512,19 @@ func (r *runner) finishSummary(s *Summary) {
 	sort.Strings(s.Waiting)
 }
 
+// confirmCommand names what confirms the waiting rules: setup for the safe ones, consent for the recommended ones.
+func (r *runner) confirmCommand() string {
+	var cmds []string
+	labels := slices.Collect(maps.Values(r.waiting))
+	if slices.Contains(labels, core.LabelSafe) {
+		cmds = append(cmds, "sapulidi setup")
+	}
+	if slices.Contains(labels, core.LabelRecommended) {
+		cmds = append(cmds, "sapulidi consent --yes --recommended")
+	}
+	return strings.Join(cmds, " and ")
+}
+
 // Plan reports what a run would do. It never removes anything.
 func Plan(env *core.Env, cats []core.Category, opt Options) Summary {
 	if refuse(env, opt) != "" {
@@ -623,7 +638,8 @@ func Run(env *core.Env, cats []core.Category, st *state.Store, opt Options) (Sum
 	}
 	r.finishSummary(&s)
 	if len(s.Waiting) > 0 {
-		r.sink.Fact("waiting-rules", fmt.Sprintf("%d rule(s) wait for your confirmation: run setup.", len(s.Waiting)))
+		r.sink.Fact("waiting-rules", fmt.Sprintf("%d rule(s) wait for your confirmation: run %s.", len(s.Waiting),
+			r.confirmCommand()))
 	}
 	if !r.explicit { // an Explicit run shows no notification and does not use up the notify-once flag
 		r.flushFacts(st)

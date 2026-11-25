@@ -572,6 +572,19 @@ func TestWorktreeOpenKept(t *testing.T) {
 	}
 }
 
+// CG1: was TestOptionalRunsWithoutRuleConsent; an enabled optional rule now needs consent like any other.
+func TestOptionalNeedsRuleConsent(t *testing.T) {
+	f := newFix(t)
+	f.set.ConsentAll = false
+	p := f.mk("a")
+	c := f.cand(p)
+	c.Category, c.RuleKey = "deps", "x/deps@1"
+	s := f.do(Options{}, f.cat("deps", core.Optional, c))
+	if !exists(p) || hasPath(s.Removed, p) || !hasPath(s.WouldRemove, p) {
+		t.Fatalf("%+v", s)
+	}
+}
+
 func TestOptionalDisabledNotScanned(t *testing.T) {
 	f := newFix(t)
 	cat := f.cat("deps", core.Optional)
