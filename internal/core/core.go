@@ -51,5 +51,5 @@ func Keep(why, detail string) error { return &KeepError{Why: why, Detail: detail
 
 type Root struct {
 	Path   string // absolute, top-level of a git repository or a configured directory
-	Source string // "config" | "claude" | "codex"
+	Source string // "config" | "claude" | "codex" | "claude+children" | "codex+children"
 }

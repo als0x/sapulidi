@@ -1,5 +1,6 @@
 // Package roots finds where the user works: configured roots plus the git repositories seen in
-// agent history (spec 4.3). It never scans the home directory.
+// agent history (spec 4.3), including those inside a history folder that is not a repository.
+// It never scans the home directory.
 package roots
 
 import (
@@ -10,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +26,8 @@ const (
 	maxLines       = 200
 	maxBytes       = 1 << 20
 	maxRoots       = 500
+	maxPerExpanded = 200
+	childrenSuffix = "+children"
 	maxPerFolder   = 3
 	gitTimeout     = 5 * time.Second
 	defaultBudget  = 20 * time.Second
@@ -137,7 +141,8 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 		}
 	}
 
-	var tops []string // real paths of toplevels already resolved
+	var tops []string  // real paths of toplevels already resolved
+	var folders []cand // history cwds that are not repositories
 	for _, cwd := range order {
 		if over() {
 			break
@@ -152,6 +157,10 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 			continue
 		}
 		top, why := repoRoot(env.Run, cwd)
+		if why == "not-git" {
+			folders = append(folders, cand{path: cwd, source: cwds[cwd]})
+			continue
+		}
 		if why != "" {
 			drop(cwd, why)
 			continue
@@ -159,15 +168,28 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 		tops = append(tops, realPath(top))
 		cands = append(cands, cand{path: top, source: cwds[cwd]})
 	}
-	if expired {
-		drop("", "budget")
-	}
 
 	temps := make([]string, 0, len(env.TempDirs))
 	for _, t := range env.TempDirs {
 		if t != "" {
 			temps = append(temps, realPath(t))
 		}
+	}
+
+	// Expanded roots come last, so a root named directly wins over the same one found in a folder.
+	for _, f := range folders {
+		if why := check(env, f, temps); why != "" {
+			drop(f.path, why)
+			continue
+		}
+		found := expand(env, f, over, drop)
+		if len(found) == 0 {
+			drop(f.path, "not-git")
+		}
+		cands = append(cands, found...)
+	}
+	if expired {
+		drop("", "budget")
 	}
 
 	seen := map[string]bool{}
@@ -201,6 +223,7 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 		}
 		final = append(final, c)
 	}
+	configured := len(final)
 	for _, c := range disc {
 		if insideAny(c.key, final) {
 			drop(c.path, "nested")
@@ -208,8 +231,9 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 		}
 		final = append(final, c)
 	}
+	slices.SortStableFunc(final[configured:], func(a, b cand) int { return expandedRank(a) - expandedRank(b) })
 
-	// Cap: config roots first, then discovered ones in path order.
+	// Cap: config roots first, then direct history ones, then expanded ones, each in path order.
 	if len(final) > maxRoots {
 		for _, c := range final[maxRoots:] {
 			drop(c.path, "cap")
@@ -223,6 +247,13 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 		out = append(out, core.Root{Path: c.path, Source: c.source})
 	}
 	return out, kept
+}
+
+func expandedRank(c cand) int {
+	if strings.HasSuffix(c.source, childrenSuffix) {
+		return 1
+	}
+	return 0
 }
 
 func check(env DiscoverEnv, c cand, temps []string) string {
