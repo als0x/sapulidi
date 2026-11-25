@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Prepare a release. Run by the owner, never by CI.
 # usage: scripts/release.sh <version> [--dry-run]
+# The binaries check for updates in one GitHub repository: SAPULIDI_REPO=owner/repo, or the one the origin remote names.
 # Bumps the version in the launcher, install.sh and every manifest (the binary embeds them), builds the four
 # binaries from that tree the same way the release workflow does, writes checksums.txt, and only then runs tests/run.sh. It prints the commit,
 # tag and push commands; it never commits, tags or pushes. The tree must be clean at the start. If any step fails, including the
@@ -38,11 +39,22 @@ changed="bin/sapulidi install.sh checksums.txt $manifests"
 targets="darwin/arm64 darwin/amd64 linux/arm64 linux/amd64"
 mod=github.com/als0x/sapulidi
 
+# The release repository the binaries are told about: SAPULIDI_REPO, else a GitHub origin remote.
+repo=${SAPULIDI_REPO:-}
+if [ -z "$repo" ]; then
+	url=$(git remote get-url origin 2>/dev/null || true)
+	repo=$(printf '%s\n' "$url" | sed -nE 's#^(https://|ssh://git@|git@)github\.com[:/]([^/]+/[^/]+)$#\2#p')
+	repo=${repo%.git}
+fi
+repo_re='^[0-9A-Za-z-]+/[0-9A-Za-z._-]+$'
+[[ $repo =~ $repo_re ]] || repo=
+no_repo="no release repository: set SAPULIDI_REPO=owner/repo, or leave it unset with a GitHub origin remote"
+
 # Every build runs with this environment, so it matches the release workflow.
 gobuild() { # os arch out
 	env -u GOFLAGS -u GOARM64 CGO_ENABLED=0 GOAMD64=v1 GOTOOLCHAIN=local GOOS="$1" GOARCH="$2" \
 		go build -trimpath -buildvcs=false \
-		-ldflags "-s -w -X $mod/internal/version.Version=$version" -o "$3" ./cmd/sapulidi
+		-ldflags "-s -w -X $mod/internal/version.Version=$version -X $mod/internal/version.Repo=$repo" -o "$3" ./cmd/sapulidi
 }
 
 echo "release plan for v$version:"
@@ -52,7 +64,8 @@ for f in $manifests; do
 	echo "  2. set \"version\": \"$version\" in $f"
 done
 echo "  3. check install.sh, bin/sapulidi and the manifests carry the new version"
-echo "  4. build into dist/ from the bumped tree (CGO_ENABLED=0, GOAMD64=v1, -trimpath -buildvcs=false):"
+echo "  4. build into dist/ from the bumped tree (CGO_ENABLED=0, GOAMD64=v1, -trimpath -buildvcs=false)"
+echo "     with updates checked in the repository ${repo:-(none)}:"
 for t in $targets; do
 	echo "       sapulidi_${version}_${t%/*}_${t#*/}"
 done
@@ -68,10 +81,15 @@ if [ "$dry" = 1 ]; then
 	[ -z "$dirty" ] || echo "warning: the working tree is not clean; a real run would refuse"
 	[ ! -e dist ] || echo "warning: dist/ exists; a real run would refuse"
 	[ "go$want" = "$got" ] || echo "warning: go is $got, go.mod toolchain line wants go$want; a real run would fail"
+	[ -n "$repo" ] || echo "warning: $no_repo; a real run would refuse"
 	echo "dry run: no file was changed"
 	exit 0
 fi
 
+if [ -z "$repo" ]; then
+	echo "$no_repo" >&2
+	exit 1
+fi
 if [ -n "$dirty" ]; then
 	echo "the working tree is not clean; commit or stash first" >&2
 	exit 1

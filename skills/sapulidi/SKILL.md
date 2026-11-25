@@ -31,13 +31,26 @@ Run `report`, `plan`, `check`, `config`, `doctor`, `roots`, `log` and `schedule 
 (list only, never procs stop) too.
 procs stop is never run by you.
 
+## Labels
+
+Every row of `plan`, `setup` and the TUI has one label. Explain it in the user's language:
+
+- safe: the schedule removes it once the user consented.
+- recommended: sapulidi would remove it; the schedule does so only if the user allowed recommended rows.
+- your call: listed only, never removed by the schedule.
+- protected: not removable now; a guard or an exclusion keeps it.
+
+Never run `consent`, `run --recommended` or `update` for the user, with or without flags. Print the command for the
+user to type in their OWN terminal: `sapulidi consent --yes` (waiting safe rules),
+`sapulidi run --recommended`, `sapulidi update`. A line that says a newer release is out is information: pass it on.
+
 ## Confirmation rule
 
 The binary cannot tell a yes typed by the user from one typed by you, so commands are tiered by harm.
 Show the exact command first and run it only after the user said yes to it in this conversation.
 
-- Chat tier: `setup --yes` and `consent --yes`, enabling or disabling a built-in optional category, changing an
-  age within limits with `config set`, applying a clean-once proposal that passes the built-in rules.
+- Chat tier: `setup --yes` (never add `--recommended`), enabling or disabling a built-in optional category,
+  changing an age within limits with `config set`, applying a clean-once proposal that passes the built-in rules.
 - Terminal tier: `procs stop`, adding a user rule (from a proposal or by hand) and `uninstall --all`. Print the
   exact command for the user to type in their OWN terminal and never try to run it.
   Never use script, expect, a pty, a pipe or a redirect to feed it input.

@@ -61,6 +61,34 @@ unattended; each is a disk leak, a missing hardening step or an accepted limit.
 - When only `wget` is available, it cannot refuse an https to http redirect; `curl` is preferred and refuses it.
 - On Linux the TUI does not show the next scheduled run (systemd and cron).
 
+## Updates (0.3.0)
+
+- The update check talks to api.github.com at most once a day, started by `sapulidi check` (the session-start hook), to
+  ask for the latest release of the repository the binary was built for; GitHub sees the request and the address it
+  comes from. To turn it off, put this in `config.toml`: a `[update]` table with `check = false`. A development build
+  names no repository and never checks, and neither does a build whose config file is not valid TOML.
+- `[update] auto = true` (off by default) lets the scheduled run install a newer release, for `install.sh` installs
+  only. It asks once a day on its own, so there can then be two requests a day. A plugin install is updated through
+  the host.
+- Trust in an update comes from one place: the binary and the `checksums.txt` it is checked against come from the
+  same repository (the release assets and the file at the release tag). The checksum catches a damaged or swapped
+  download, not a repository or account that someone else controls.
+- `sapulidi update` run by hand reads `SAPULIDI_RELEASE_BASE` and `SAPULIDI_RAW_BASE` like `install.sh`, and prints
+  both addresses before it asks. The automatic update ignores them.
+
+## Recommended rules
+
+These optional rules carry the label `recommended`. The schedule removes what they find only after
+`sapulidi setup --yes --recommended` or `sapulidi consent --yes --recommended`; `sapulidi run --recommended` removes it
+once, after a question on a terminal.
+
+- Coding agents: `agent/claude-plugin-cache`, `agent/claude-versions`, `code-index/code-index`
+- Build output: `apple/derived-data`, `dart/dart-build`, `elixir/mix-build`, `jvm/gradle-build`, `jvm/maven-target`,
+  `node/next`, `node/node-modules`, `node/nuxt`, `node/parcel-cache`, `node/svelte-kit`, `node/turbo`,
+  `python/egg-info`, `python/tox-nox`, `rust/target`, `swift/swiftpm-build`, `zig/zig-build`
+- Crash dumps: `crash/dumps`, `jvm/hs-err`
+- Worktrees: `worktrees/linked` (ignored files inside the worktree go with it, see above)
+
 ## Auto-bucket proofs (audit after FR1 M1)
 
 Every auto category and what its proof is, so no auto rule rests on a name or an age alone:
