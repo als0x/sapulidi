@@ -99,7 +99,12 @@ func runRun(app *App, args []string) int {
 	if err != nil {
 		return fail(app, "run", err)
 	}
-	return printRun(app, sum)
+	code := printRun(app, sum)
+	// A run that was held back (paused, busy, uninstalled, not set up yet) does not update either.
+	if *trigger == "schedule" && !*dry && (sum.Mode == "run" || sum.Mode == "dry-run") {
+		autoUpdate()
+	}
+	return code
 }
 
 func refuseNoTerminal(app *App) int {
@@ -153,10 +158,6 @@ func printRun(app *App, sum engine.Summary) int {
 		for _, f := range sum.Failed {
 			fmt.Fprintf(app.Stderr, "failed: %s %s\n", f.Category, f.Path)
 		}
-	}
-	// A run that was held back (paused, busy, uninstalled, not set up yet) does not update either.
-	if *trigger == "schedule" && !*dry && (sum.Mode == "run" || sum.Mode == "dry-run") {
-		autoUpdate()
 	}
 	if len(sum.Failed) > 0 {
 		return 1
