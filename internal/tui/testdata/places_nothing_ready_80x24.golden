@@ -1,15 +1,15 @@
 +- summary --------------------------------------------------------------------+
-| Free now: 0 B automatic | 1.2 GB if you choose | 155 protected               |
+| Free now: 0 B safe | 0 B recommended | 1.2 GB your call | 155 protected      |
 | to remove: 0 B, 0 of 1 selected | excluded: 0                                |
 | agents installed: 2 | schedule: every 30m, next 14:30                        |
 | disk free: 37.3 GB -> 37.3 GB                                                |
-| kept: 155 | g                                                                |
+| protected: 155 | g                                                           |
 +------------------------------------------------------------------------------+
-         ready  optional place                                  kept updatedAt 
-  ready = removable now | optional = you pick it | kept = protected
-  nothing is ready to delete automatically;
-  1.2 GB can be chosen by hand: press enter on a place
->[ ]         -    1.2 GB ~/old/                                    - -         
+          safe      rec. your call place                        prot. updatedAt 
+  safe, recommended: preselected | your call: you pick | protected: stays
+  nothing is safe or recommended to remove;
+  1.2 GB is your call: press enter on a place
+>[ ]         -         -    1.2 GB ~/old/                           - -         
 
 
 
@@ -20,5 +20,5 @@
 
 
 
-0 ready | 1 optional | 0 kept. enter to look inside
-enter open | space select | d delete | g protected | c view | ? help | q quit
+1 your call. enter to look inside
+enter open | space toggle | d delete | g protected | c view | ? help | q quit

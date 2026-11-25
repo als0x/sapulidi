@@ -22,6 +22,7 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		if m.Screen == ScreenConfirm {
 			m.Status = "the list changed: confirm again"
 		}
+		start := m.Screen == ScreenScanning // only the first scan selects what is safe or recommended
 		m.Rows = dedupeRows(msg.Rows)
 		for i := range m.Rows {
 			m.Rows[i].Place = placeOfRow(m.Rows[i], msg.Summary.Roots, msg.Summary.Bases, msg.Summary.Home)
@@ -32,7 +33,7 @@ func Update(m Model, msg Msg) (Model, []Effect) {
 		m.Confirm, m.PlacePrompt = nil, ""
 		sel := map[string]bool{}
 		for _, r := range m.Rows {
-			if m.Selected[r.Path] && r.selectable() {
+			if m.Selected[r.Path] && r.selectable() || start && readyRow(r) {
 				sel[r.Path] = true
 			}
 		}
@@ -259,14 +260,12 @@ func listKeyInner(m Model, k KeyMsg) (Model, []Effect) {
 		return m, []Effect{Quit{}}
 	case k.Rune == '/':
 		m.Filtering = true
-	case k.Rune == 'a' && m.Screen == ScreenPlace:
-		m = selectReadyVisible(m)
 	case k.Rune == 'a':
-		m = selectAll(m)
+		m = selectReadyVisible(m)
 	case k.Rune == 's':
 		m.Sort = (m.Sort + 1) % 4
 	case k.Rune == 'o' && m.Screen == ScreenPlace:
-		m.Status = "optional rows are always listed here"
+		m.Status = "switched off rows are always listed here"
 	case k.Rune == 'o':
 		m = toggleOptional(m)
 	case k.Rune == 'g':
@@ -301,7 +300,7 @@ func rowAction(m Model, k KeyMsg) (Model, []Effect) {
 		case r.Source == SrcExcluded:
 			return m, []Effect{RemoveExclusion{Path: r.Path}}
 		case r.Source == SrcKept:
-			m.Status = "kept by a guard: nothing to exclude"
+			m.Status = "protected by a guard: nothing to exclude"
 			if r.Guard == guardRefresh {
 				m.Status = "refresh the list by running sapulidi again"
 			}
@@ -344,16 +343,6 @@ func (m Model) size() (int, int) {
 		return minWidth, minHeight
 	}
 	return m.W, m.H
-}
-
-func selectAll(m Model) Model {
-	m.Selected = cloneSel(m.Selected)
-	for _, r := range m.visible() {
-		if r.selectable() {
-			m.Selected[r.Path] = true
-		}
-	}
-	return m
 }
 
 func toggleOptional(m Model) Model {

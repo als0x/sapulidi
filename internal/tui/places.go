@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 // placeOf is the place of an absolute path, in this order: the longest root that is a path-segment prefix of it
@@ -55,8 +57,22 @@ func showHome(dir, home string) string {
 	return strings.TrimRight(dir, "/") + "/"
 }
 
-// placeOfRow is the place of a row: rows without a real path go to "commands · <category>".
+// agentPlaces names the place of the rows of an agent rule, by the rule's location.
+var agentPlaces = map[string]string{
+	"claude-scratch":      "Claude Code · scratch",
+	"claude-transcripts":  "Claude Code · transcripts",
+	"claude-versions":     "Claude Code · versions",
+	"claude-plugin-cache": "Claude Code · plugin cache",
+	"codex-tmp":           "Codex · tmp",
+	"codex-sessions":      "Codex · sessions",
+}
+
+// placeOfRow is the place of a row: a row of an agent rule goes to the agent's place, and rows without a real path
+// go to "commands · <category>".
 func placeOfRow(r Row, roots, bases []string, home string) string {
+	if p := agentPlaces[r.Location]; p != "" {
+		return p
+	}
 	if p := placeOf(r.Path, roots, bases, home); p != "" {
 		return p
 	}
@@ -65,17 +81,37 @@ func placeOfRow(r Row, roots, bases []string, home string) string {
 
 // place is one line of the places view.
 type place struct {
-	Name                    string
-	ReadyN, OptN, KeptN     int
-	ExclN, OtherN           int // excluded rows; rows that are neither (wholesale commands)
-	ReadyBytes, OptBytes    int64
-	ReadyUnknown, OptUnknwn bool
-	Updated                 time.Time
-	Selectable, Selected    int
+	Name                 string
+	Safe, Rec, Call      tally // the selectable rows, by label
+	KeptN                int
+	ExclN, OtherN        int // excluded rows; rows that are neither (wholesale commands)
+	Updated              time.Time
+	Selectable, Selected int
 }
 
-// readyRow reports a selectable row that is on by default (auto or optional switched on).
-func readyRow(r Row) bool { return r.selectable() && r.Source != SrcOptionalOff }
+// tally is a number of rows and their size.
+type tally struct {
+	N       int
+	Bytes   int64
+	Unknown bool // some size is unknown
+}
+
+func (t *tally) add(b int64) {
+	t.N++
+	addBytes(&t.Bytes, &t.Unknown, b)
+}
+
+func (t tally) cell() string { return sizeCell(t.N, t.Bytes, t.Unknown) }
+
+// readyN is the number of safe and recommended rows.
+func (p place) readyN() int { return p.Safe.N + p.Rec.N }
+
+// readyRow reports a selectable row that is selected at start, and by `a` and space on a place. It is an
+// allow-list: only a row labelled safe or recommended.
+func readyRow(r Row) bool {
+	l := r.label()
+	return r.selectable() && (l == core.LabelSafe || l == core.LabelRecommended)
+}
 
 // allPlaces groups every row by place, in no particular order.
 func (m Model) allPlaces() []place {
@@ -93,12 +129,12 @@ func (m Model) allPlaces() []place {
 			p.ExclN++
 		case r.Source == SrcKept:
 			p.KeptN++
-		case readyRow(r):
-			p.ReadyN++
-			addBytes(&p.ReadyBytes, &p.ReadyUnknown, r.Bytes)
+		case r.selectable() && r.label() == core.LabelSafe:
+			p.Safe.add(r.Bytes)
+		case r.selectable() && r.label() == core.LabelRecommended:
+			p.Rec.add(r.Bytes)
 		case r.selectable():
-			p.OptN++
-			addBytes(&p.OptBytes, &p.OptUnknwn, r.Bytes)
+			p.Call.add(r.Bytes)
 		default:
 			p.OtherN++
 		}
@@ -127,13 +163,13 @@ func addBytes(sum *int64, unknown *bool, b int64) {
 	*sum += b
 }
 
-// listed reports whether the places view shows the place: it has a ready, optional or excluded row (or a
-// wholesale command row), or `g` is on.
+// listed reports whether the places view shows the place: it has a selectable or excluded row (or a wholesale
+// command row), or `g` is on.
 func (p place) listed(showKept bool) bool {
-	return p.ReadyN+p.OptN+p.ExclN+p.OtherN > 0 || showKept
+	return p.readyN()+p.Call.N+p.ExclN+p.OtherN > 0 || showKept
 }
 
-func (p place) size() int64 { return p.ReadyBytes + p.OptBytes }
+func (p place) size() int64 { return p.Safe.Bytes + p.Rec.Bytes + p.Call.Bytes }
 
 // places returns the places in view: filtered by the search and sorted.
 func (m Model) places() []place {
@@ -182,7 +218,7 @@ func placesSortName(k SortKey) string {
 	case SortPath:
 		return sortNames[SortPath]
 	}
-	return "ready + optional size, largest first"
+	return "size, largest first"
 }
 
 // plural is "1 row", "2 rows".
@@ -263,7 +299,7 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Rune == '/':
 		m.Filtering = true
 	case k.Rune == 'a':
-		m = selectReadyIn(m, m.places())
+		m = selectReadyIn(m, m.places(), false)
 	case k.Rune == ' ':
 		if curOK {
 			m = spacePlace(m, cur)
@@ -275,7 +311,7 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 		m.ShowKept = !m.ShowKept
 		m = m.keepPlaceOn(cur.Name)
 	case k.Rune == 'o':
-		m.Status = "optional rows are always listed here"
+		m.Status = "switched off rows are always listed here"
 	case k.Rune == 'c':
 		m = toggleView(m)
 	case k.Rune == '?':
@@ -290,8 +326,8 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	return m, nil
 }
 
-// optionalPaths are the selectable optional-off rows of a place.
-func (m Model) optionalPaths(name string) (paths []string, all bool) {
+// callPaths are the selectable "your call" rows of a place.
+func (m Model) callPaths(name string) (paths []string, all bool) {
 	all = true
 	for _, r := range m.Rows {
 		if r.Place == name && r.selectable() && !readyRow(r) {
@@ -302,9 +338,9 @@ func (m Model) optionalPaths(name string) (paths []string, all bool) {
 	return paths, all
 }
 
-// unselectedOptional counts the optional rows of a place that are not selected, with their size.
-func (m Model) unselectedOptional(name string) (n int, bytes int64, unknown bool) {
-	paths, _ := m.optionalPaths(name)
+// unselectedCall counts the "your call" rows of a place that are not selected, with their size.
+func (m Model) unselectedCall(name string) (out tally) {
+	paths, _ := m.callPaths(name)
 	byPath := map[string]Row{}
 	for _, r := range m.Rows {
 		if r.Place == name {
@@ -313,18 +349,17 @@ func (m Model) unselectedOptional(name string) (n int, bytes int64, unknown bool
 	}
 	for _, p := range paths {
 		if !m.Selected[p] {
-			n++
-			addBytes(&bytes, &unknown, byPath[p].Bytes)
+			out.add(byPath[p].Bytes)
 		}
 	}
-	return n, bytes, unknown
+	return out
 }
 
-// spacePlace is `space` on a place. Ready rows are toggled directly; a place with only optional rows asks first,
-// so an optional row is never selected without the user seeing the question.
+// spacePlace is `space` on a place. Safe and recommended rows are toggled directly; a place with only "your call"
+// rows asks first, so such a row is never selected without the user seeing the question.
 func spacePlace(m Model, cur place) Model {
-	if cur.ReadyN == 0 && cur.OptN > 0 {
-		paths, all := m.optionalPaths(cur.Name)
+	if cur.readyN() == 0 && cur.Call.N > 0 {
+		paths, all := m.callPaths(cur.Name)
 		if !all {
 			m.PlacePrompt = cur.Name
 			return m
@@ -335,21 +370,20 @@ func spacePlace(m Model, cur place) Model {
 		}
 		return m
 	}
-	m = selectReadyIn(m, []place{cur})
-	if cur.ReadyN > 0 && m.Status == "" && m.placeReadySelected(cur.Name) {
-		n, b, u := m.unselectedOptional(cur.Name)
-		switch {
-		case n > 0:
-			m.Status = fmt.Sprintf("%s selected; %s (%s) stay unselected: enter to pick them",
-				plural(cur.ReadyN, "ready row"), plural(n, "optional row"), sizeCell(1, b, u))
-		case cur.ReadyN > 1:
-			m.Status = fmt.Sprintf("selected %d ready rows in %s (enter to see them)", cur.ReadyN, cur.Name)
+	m = selectReadyIn(m, []place{cur}, true)
+	if n := cur.readyN(); n > 0 && m.Status == "" && m.placeReadySelected(cur.Name) {
+		switch left := m.unselectedCall(cur.Name); {
+		case left.N > 0:
+			m.Status = fmt.Sprintf("selected %s; your call: %s (%s), enter to pick",
+				plural(n, "row"), plural(left.N, "row"), left.cell())
+		case n > 1:
+			m.Status = fmt.Sprintf("selected %d rows in %s (enter to see them)", n, placeText(m, cur.Name))
 		}
 	}
 	return m
 }
 
-// promptKey handles the optional-rows question: only y, n and esc do anything.
+// promptKey handles the "your call" question: only y, n and esc do anything.
 func promptKey(m Model, k KeyMsg) (Model, []Effect) {
 	if m.small() { // the prompt is not on screen: no key acts
 		m.PlacePrompt = ""
@@ -363,9 +397,9 @@ func promptKey(m Model, k KeyMsg) (Model, []Effect) {
 	if k.Rune != 'y' {
 		return m, nil
 	}
-	paths, _ := m.optionalPaths(name)
+	paths, _ := m.callPaths(name)
 	for _, p := range m.allPlaces() {
-		if p.Name == name && p.ReadyN > 0 { // the rows changed under the prompt: ask again with space
+		if p.Name == name && p.readyN() > 0 { // the rows changed under the prompt: ask again with space
 			paths = nil
 		}
 	}
@@ -376,22 +410,22 @@ func promptKey(m Model, k KeyMsg) (Model, []Effect) {
 	return m, nil
 }
 
-// promptLine is the one-line question of the optional-rows prompt, fitted to w columns.
+// promptLine is the one-line question of the "your call" prompt, fitted to w columns.
 func promptLine(m Model, w int) string {
-	n, b, u := 0, int64(0), false
+	var t tally
 	for _, p := range m.allPlaces() {
 		if p.Name == m.PlacePrompt {
-			n, b, u = p.OptN, p.OptBytes, p.OptUnknwn
+			t = p.Call
 		}
 	}
 	tail := fmt.Sprintf(")?  y: yes %s n / esc: no", dot(m.Plain))
-	head := fmt.Sprintf("Select all %s in ", plural(n, "optional row"))
-	size := " (" + sizeCell(1, b, u)
-	room := w - len(head) - len(size) - len(tail)
+	head := fmt.Sprintf("Select %s (your call) in ", plural(t.N, "row"))
+	size := " (" + sizeCell(1, t.Bytes, t.Unknown)
+	room := w - cols(head) - cols(size) - cols(tail)
 	return head + shorten(placeText(m, m.PlacePrompt), max(room, 8)) + size + tail
 }
 
-// placeReadySelected reports whether every ready row of the place is selected.
+// placeReadySelected reports whether every safe and recommended row of the place is selected.
 func (m Model) placeReadySelected(name string) bool {
 	for _, r := range m.Rows {
 		if r.Place == name && readyRow(r) && !m.Selected[r.Path] {
@@ -401,16 +435,17 @@ func (m Model) placeReadySelected(name string) bool {
 	return true
 }
 
-// selectReadyIn toggles every READY row of the given places: when all of them are selected they are deselected.
-// Optional-off and kept rows are never touched. With nothing ready it only says why.
-func selectReadyIn(m Model, ps []place) Model {
+// selectReadyIn selects every safe and recommended row of the given places. With toggle (space), when all of them
+// are selected already they are deselected. "Your call" and protected rows are never touched. With nothing to
+// select it only says why.
+func selectReadyIn(m Model, ps []place, toggle bool) Model {
 	names := map[string]bool{}
-	var optOnly, keptOnly, wholeOnly bool
+	var callOnly, keptOnly, wholeOnly bool
 	for _, p := range ps {
 		names[p.Name] = true
 		wholeOnly = wholeOnly || p.Selectable == 0 && p.OtherN > 0
-		optOnly = optOnly || p.ReadyN == 0 && p.OptN > 0
-		keptOnly = keptOnly || p.ReadyN == 0 && p.KeptN > 0
+		callOnly = callOnly || p.readyN() == 0 && p.Call.N > 0
+		keptOnly = keptOnly || p.readyN() == 0 && p.KeptN > 0
 	}
 	var ready []string
 	all := true
@@ -423,19 +458,19 @@ func selectReadyIn(m Model, ps []place) Model {
 	if len(ready) == 0 {
 		switch {
 		case len(ps) != 1:
-			m.Status = "nothing ready to select"
-		case optOnly:
-			m.Status = "only optional rows here: open it and pick them"
+			m.Status = "nothing safe or recommended to select"
+		case callOnly:
+			m.Status = "only your call rows here: open it and pick them"
 		case keptOnly, wholeOnly:
 			m.Status = "protected: nothing here can be removed from this screen"
 		default:
-			m.Status = "nothing ready to select here"
+			m.Status = "nothing safe or recommended to select here"
 		}
 		return m
 	}
 	m.Selected = cloneSel(m.Selected)
 	for _, p := range ready {
-		if all {
+		if toggle && all {
 			delete(m.Selected, p)
 		} else {
 			m.Selected[p] = true
@@ -444,7 +479,7 @@ func selectReadyIn(m Model, ps []place) Model {
 	return m
 }
 
-// selectReadyVisible is `a` inside a place: it selects the ready rows in view, never the optional switched-off ones.
+// selectReadyVisible is `a` in a list: it selects the safe and recommended rows in view, never a "your call" one.
 func selectReadyVisible(m Model) Model {
 	m.Selected = cloneSel(m.Selected)
 	n := 0
@@ -455,7 +490,7 @@ func selectReadyVisible(m Model) Model {
 		}
 	}
 	if n == 0 {
-		m.Status = "no ready rows here: space picks an optional row"
+		m.Status = "no safe or recommended rows here: space picks a single row"
 	}
 	return m
 }
@@ -506,7 +541,25 @@ func placeText(m Model, name string) string {
 	return name
 }
 
-func placeRow(m Model, p place, cur bool, pw int) string {
+// placeCols are the column headers and widths of the places at a window width. Under 100 columns two headers are
+// abbreviated so that the place names fit.
+type placeCols struct {
+	rec, prot   string
+	recW, protW int
+	place       int
+}
+
+func colsFor(w int) placeCols {
+	c := placeCols{rec: "recommended", prot: "protected", recW: 11, protW: 9}
+	if w < 100 {
+		c = placeCols{rec: "rec.", prot: "prot.", recW: 9, protW: 5}
+	}
+	// mark and box 5, safe and "your call" 10 each, updatedAt 10, and a space after rec, place and protected
+	c.place = w - 38 - c.recW - c.protW
+	return c
+}
+
+func placeRow(m Model, p place, cur bool, c placeCols) string {
 	mark := " "
 	if cur {
 		mark = ">"
@@ -515,9 +568,9 @@ func placeRow(m Model, p place, cur bool, pw int) string {
 	if p.KeptN > 0 {
 		kept = fmt.Sprintf("%d", p.KeptN)
 	}
-	line := mark + placeMark(p) + " " + fitRight(sizeCell(p.ReadyN, p.ReadyBytes, p.ReadyUnknown), 9) + " " +
-		fitRight(sizeCell(p.OptN, p.OptBytes, p.OptUnknwn), 9) + " " + fit(shorten(placeText(m, p.Name), pw), pw) + " " +
-		fitRight(kept, 4) + " " + fit(fmtDate(p.Updated), 10)
+	line := mark + placeMark(p) + " " + fitRight(p.Safe.cell(), 9) + " " + fitRight(p.Rec.cell(), c.recW) + " " +
+		fitRight(p.Call.cell(), 9) + " " + fit(shorten(placeText(m, p.Name), c.place), c.place) + " " +
+		fitRight(kept, c.protW) + " " + fit(fmtDate(p.Updated), 10)
 	switch {
 	case cur:
 		return style(m.Plain, "7", line)
@@ -527,15 +580,15 @@ func placeRow(m Model, p place, cur bool, pw int) string {
 	return line
 }
 
-func placesHead(pw int) string {
-	return " " + "    " + fitRight("ready", 9) + " " + fitRight("optional", 9) + " " + fit("place", pw) + " " +
-		fitRight("kept", 4) + " " + fit("updatedAt", 10)
+func placesHead(c placeCols) string {
+	return " " + "    " + fitRight("safe", 9) + " " + fitRight(c.rec, c.recW) + " " + fitRight("your call", 9) + " " +
+		fit("place", c.place) + " " + fitRight(c.prot, c.protW) + " " + fit("updatedAt", 10)
 }
 
 func viewPlaces(m Model, w, h int) []string {
 	lines := topPanels(m, w)
-	pw := w - 42
-	lines = append(lines, style(m.Plain, "1", placesHead(pw)), cut("  "+legend(m, "ready"), w))
+	c := colsFor(w)
+	lines = append(lines, style(m.Plain, "1", placesHead(c)), cut("  "+legend(m), w))
 	if s := nothingReadyLine(m); s != "" {
 		for _, l := range strings.Split(s, "\n") { // two lines: the whole sentence must fit 80 columns
 			lines = append(lines, cut("  "+l, w))
@@ -548,14 +601,14 @@ func viewPlaces(m Model, w, h int) []string {
 		if m.Filter != "" {
 			lines = append(lines, "  nothing matches the search (esc clears it)")
 		} else {
-			lines = append(lines, "  nothing is ready to delete")
+			lines = append(lines, "  nothing to remove here")
 			for _, l := range hiddenLines(m) {
 				lines = append(lines, "  "+l)
 			}
 		}
 	}
 	for i := top; i < len(vis) && i < top+rowsH; i++ {
-		lines = append(lines, placeRow(m, vis[i], i == m.Cursor, pw))
+		lines = append(lines, placeRow(m, vis[i], i == m.Cursor, c))
 	}
 	for len(lines) < h-2 {
 		lines = append(lines, "")
@@ -563,24 +616,22 @@ func viewPlaces(m Model, w, h int) []string {
 	return append(lines, placesStatus(m, vis, w), cut(footerOf(m), w))
 }
 
-// nothingReadyLine says so in plain words when no row is ready but some can be chosen by hand; "" otherwise.
+// nothingReadyLine says so in plain words when no row is safe or recommended but some are the user's call; ""
+// otherwise.
 func nothingReadyLine(m Model) string {
-	var optN int
-	var optB int64
-	var optU bool
+	var call tally
 	for _, r := range m.Rows {
 		switch {
 		case readyRow(r):
 			return ""
 		case r.selectable():
-			optN++
-			addBytes(&optB, &optU, r.Bytes)
+			call.add(r.Bytes)
 		}
 	}
-	if optN == 0 {
+	if call.N == 0 {
 		return ""
 	}
-	return fmt.Sprintf("nothing is ready to delete automatically;\n%s can be chosen by hand: press enter on a place", sizeCell(1, optB, optU))
+	return fmt.Sprintf("nothing is safe or recommended to remove;\n%s is your call: press enter on a place", call.cell())
 }
 
 func placesStatus(m Model, vis []place, w int) string {
@@ -595,14 +646,23 @@ func placesStatus(m Model, vis []place, w int) string {
 		return cut(m.Status, w)
 	}
 	if p, ok := m.cursorPlace(); ok {
-		s := fmt.Sprintf("%d ready %s %d optional %s %d kept", p.ReadyN, dot(m.Plain), p.OptN, dot(m.Plain), p.KeptN)
-		if p.ExclN > 0 {
-			s += fmt.Sprintf(" %s %d excluded", dot(m.Plain), p.ExclN)
+		if p.readyN()+p.Call.N+p.ExclN+p.OtherN == 0 {
+			return cut(fmt.Sprintf("%d protected: nothing can be removed. enter to see why", p.KeptN), w)
 		}
-		if p.ReadyN+p.OptN+p.ExclN+p.OtherN == 0 {
-			return cut(s+": only kept rows, nothing can be removed. enter to see why", w)
+		var parts []string
+		for _, c := range []struct {
+			n    int
+			word string
+		}{{p.Safe.N, "safe"}, {p.Rec.N, "recommended"}, {p.Call.N, "your call"}, {p.KeptN, "protected"}, {p.ExclN, "excluded"}} {
+			if c.n > 0 {
+				parts = append(parts, fmt.Sprintf("%d %s", c.n, c.word))
+			}
 		}
-		return cut(s+". enter to look inside", w)
+		s := strings.Join(parts, " "+dot(m.Plain)+" ")
+		if hint := ". enter to look inside"; cols(s+hint) <= w {
+			s += hint
+		}
+		return cut(s, w)
 	}
 	s := fmt.Sprintf("%s, sorted by %s", plural(len(vis), "place"), placesSortName(m.Sort))
 	if m.Filter != "" {

@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 // Row sources.
@@ -26,12 +28,14 @@ type Row struct {
 	Origin   string // the source at scan time; restored when an exclusion is removed ("" = unknown)
 	Category string
 	RuleKey  string
-	Place    string   // the place the row is listed under, set when the scan arrives
-	Why      string   // why it is a candidate
-	Block    string   // when set, the row cannot be selected and this is the reason
-	Guards   []string // guards that passed, with their numbers
-	Guard    string   // for a kept row: the token of the guard that kept it ("" = unknown)
-	Children []Child  // largest children
+	Label    core.Label // the engine's label of the rule (see label)
+	Location string     // the location of the rule; the rules of agents are placed by it
+	Place    string     // the place the row is listed under, set when the scan arrives
+	Why      string     // why it is a candidate
+	Block    string     // when set, the row cannot be selected and this is the reason
+	Guards   []string   // guards that passed, with their numbers
+	Guard    string     // for a kept row: the token of the guard that kept it ("" = unknown)
+	Children []Child    // largest children
 	// Members makes the row a group (stopped containers): the member candidate paths, `<engine>:<id>`. Selecting the
 	// group selects every member and the confirmation lists each one; the group's own Path is never deleted.
 	Members []string
@@ -72,13 +76,26 @@ func (r Row) selectable() bool {
 	return false
 }
 
+// label is the label shown for the row. A kept or excluded row is protected. A row of a category the user switched
+// off is "your call": it is listed, never preselected, and the schedule never removes it. Any other row is safe or
+// recommended only when its label says exactly that; everything else is "your call".
+func (r Row) label() core.Label {
+	switch {
+	case r.Source == SrcKept || r.Source == SrcExcluded:
+		return core.LabelProtected
+	case r.Source != SrcOptionalOff && (r.Label == core.LabelSafe || r.Label == core.LabelRecommended):
+		return r.Label
+	}
+	return core.LabelYourCall
+}
+
 // reason is the one-line status for a row that cannot be selected, "" for a selectable row.
 func (r Row) reason() string {
 	switch {
 	case r.Source == SrcExcluded:
 		return excludedReason
 	case r.Source == SrcKept && r.Block == "":
-		return "kept by a guard"
+		return "protected by a guard"
 	}
 	return r.Block
 }
@@ -126,7 +143,7 @@ func (m Model) keepCursorOn(path string, ok bool) Model {
 	return m
 }
 
-// guardWords maps a guard token to the plain word shown after "kept" and to one sentence saying what it means.
+// guardWords maps a guard token to the plain word shown after "protected" and to one sentence saying what it means.
 var guardWords = map[string][2]string{
 	"active":          {"active", "the tool or project is in use right now"},
 	"young":           {"young", "changed too recently to be safe to remove"},
@@ -171,18 +188,25 @@ func guardMeaning(tok string) string {
 	if w, ok := guardWords[tok]; ok {
 		return w[1]
 	}
-	return "kept by the guard " + shorten(clean(tok), 40)
+	return "protected by the guard " + shorten(clean(tok), 40)
 }
 
-// sourceText is the text of the source column of a row; a kept row says why.
-func sourceText(r Row, plain bool) string {
-	if r.Source == SrcKept && r.Guard != "" {
-		if plain {
-			return "kept-" + guardReason(r.Guard)
-		}
-		return "kept · " + guardReason(r.Guard)
+// labelText is the text of the label column of a row; a protected row says why.
+func labelText(r Row, plain bool) string {
+	why := ""
+	switch {
+	case r.Source == SrcExcluded:
+		why = "excluded"
+	case r.Source == SrcKept && r.Guard != "":
+		why = guardReason(r.Guard)
 	}
-	return sourceLabel(r.Source, plain)
+	switch {
+	case why == "":
+		return r.label().Words()
+	case plain:
+		return r.label().Words() + "-" + why
+	}
+	return r.label().Words() + " · " + why
 }
 
 // visible returns the rows the list shows, filtered and sorted.
@@ -204,7 +228,7 @@ func (m Model) visible() []Row {
 }
 
 func matches(r Row, f string) bool {
-	for _, s := range []string{r.Path, r.Category, r.Source, sourceText(r, true), sourceText(r, false)} {
+	for _, s := range []string{r.Path, r.Category, labelText(r, true), labelText(r, false)} {
 		if strings.Contains(strings.ToLower(s), f) {
 			return true
 		}
@@ -343,21 +367,4 @@ func cloneSel(s map[string]bool) map[string]bool {
 		out[k] = v
 	}
 	return out
-}
-
-// sourceLabel is the text of the source column.
-func sourceLabel(src string, plain bool) string {
-	switch src {
-	case SrcOptionalOn:
-		if plain {
-			return "optional-on"
-		}
-		return "optional · on"
-	case SrcOptionalOff:
-		if plain {
-			return "optional-off"
-		}
-		return "optional · off"
-	}
-	return src
 }

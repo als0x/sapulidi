@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 var now = time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
@@ -14,24 +16,24 @@ func day(y int, mo time.Month, d int) time.Time { return time.Date(y, mo, d, 0, 
 func fixtureRows() []Row {
 	return []Row{
 		{Path: "/home/user/.cache/go-build", Bytes: 3_100_000_000, Created: day(2025, 1, 10), Updated: day(2026, 11, 1),
-			Source: SrcAuto, Category: "go", RuleKey: "go/go-build@1", Why: "Go build cache not used for 20 days",
+			Source: SrcAuto, Label: core.LabelSafe, Category: "go", RuleKey: "go/go-build@1", Why: "Go build cache not used for 20 days",
 			Guards:   []string{"deny: not on the deny list", "fresh: newest change 23 days ago, minimum 14"},
 			Children: []Child{{"3a", 900_000_000}, {"7f", 400_000_000}}},
 		{Path: "/home/user/proj/node_modules", Bytes: 1_200_000_000, Created: day(2026, 3, 2), Updated: day(2026, 6, 30),
-			Source: SrcOptionalOn, Category: "node", RuleKey: "node/node-modules@1", Why: "dependencies of a project idle for 100 days"},
+			Source: SrcOptionalOn, Label: core.LabelRecommended, Category: "node", RuleKey: "node/node-modules@1", Why: "dependencies of a project idle for 100 days"},
 		{Path: "/home/user/old/node_modules", Bytes: 800_000_000, Created: day(2024, 5, 1), Updated: day(2025, 2, 3),
 			Source: SrcOptionalOff, Category: "node", RuleKey: "node/node-modules@1", Why: "dependencies of a project idle for 400 days"},
 		{Path: "/home/user/.npm/_cacache", Bytes: 500_000_000, Created: day(2025, 8, 8), Updated: day(2026, 11, 20),
-			Source: SrcAuto, Category: "node", RuleKey: "node/npm-cache@1", Block: WholesaleReason("npm cache clean")},
+			Source: SrcAuto, Label: core.LabelSafe, Category: "node", RuleKey: "node/npm-cache@1", Block: WholesaleReason("npm cache clean")},
 		{Path: "/home/user/proj2/target", Bytes: 700_000_000, Created: day(2026, 1, 1), Updated: day(2026, 9, 9),
-			Source: SrcExcluded, Base: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
+			Source: SrcExcluded, Base: SrcAuto, Label: core.LabelSafe, Category: "rust", RuleKey: "rust/target@1"},
 		{Path: "/home/user/work/repo/.venv", Bytes: 90_000_000, Created: day(2026, 2, 2), Updated: day(2026, 11, 20),
 			Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1", Block: "kept by a guard: git repository with uncommitted work"},
 		{Path: "/home/user/containers/stopped", Bytes: 60_000_000, Created: day(2026, 10, 1), Updated: day(2026, 10, 2),
 			Source: SrcOptionalOn, Category: "docker", RuleKey: "docker/stopped@1", Members: []string{"docker:abc123", "docker:def456"}},
 		{Path: "/home/user/a/very/long/directory/name/that/does/not/fit/in/the/path/column/of/the/list/target", Bytes: 20_000_000,
-			Source: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
-		{Path: "/home/user/zz", Bytes: 10_000_000, Updated: day(2026, 11, 10), Source: SrcAuto, Category: "misc", RuleKey: "misc/zz@1"},
+			Source: SrcAuto, Label: core.LabelSafe, Category: "rust", RuleKey: "rust/target@1"},
+		{Path: "/home/user/zz", Bytes: 10_000_000, Updated: day(2026, 11, 10), Source: SrcAuto, Label: core.LabelSafe, Category: "misc", RuleKey: "misc/zz@1"},
 	}
 }
 
@@ -40,11 +42,15 @@ func fixtureSummary() SummaryData {
 		FreeNow: 40_000_000_000}
 }
 
-func listModel() Model {
-	m := NewModel(true)
-	m, _ = Update(m, ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()})
-	return flat(m)
+// scanned is a model right after its scan with the start selection cleared, so that a test of the keys starts from
+// nothing selected. The start selection itself is tested in tl1_test.go and in the property test.
+func scanned(rows []Row, s SummaryData) Model {
+	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: s})
+	m.Selected = map[string]bool{}
+	return m
 }
+
+func listModel() Model { return flat(scanned(fixtureRows(), fixtureSummary())) }
 
 // flat switches a model that just got its scan from the places to the flat candidate list (`c`).
 func flat(m Model) Model {
@@ -92,19 +98,18 @@ func pathsOf(rows []Row) []string {
 // fx4Rows has every kind of row the default view must sort out.
 func fx4Rows() []Row {
 	return []Row{
-		{Path: "/a/auto", Bytes: 100_000_000, Source: SrcAuto, Category: "go", RuleKey: "go/a@1"},
-		{Path: "/a/opt-on", Bytes: 90_000_000, Source: SrcOptionalOn, Category: "node", RuleKey: "node/a@1"},
+		{Path: "/a/auto", Bytes: 100_000_000, Source: SrcAuto, Label: core.LabelSafe, Category: "go", RuleKey: "go/a@1"},
+		{Path: "/a/opt-on", Bytes: 90_000_000, Source: SrcOptionalOn, Label: core.LabelRecommended, Category: "node", RuleKey: "node/a@1"},
 		{Path: "/a/opt-off", Bytes: 50_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/a@1"},
 		{Path: "/a/opt-off-unknown", Bytes: -1, Source: SrcOptionalOff, Category: "node", RuleKey: "node/a@1"},
-		{Path: "/a/excluded", Bytes: 80_000_000, Source: SrcExcluded, Base: SrcAuto, Category: "go", RuleKey: "go/a@1"},
+		{Path: "/a/excluded", Bytes: 80_000_000, Source: SrcExcluded, Base: SrcAuto, Label: core.LabelSafe, Category: "go", RuleKey: "go/a@1"},
 		{Path: "/a/kept-dirty", Bytes: -1, Source: SrcKept, Guard: "dirty", Category: "git", RuleKey: "git/w@1"},
 		{Path: "/a/kept-odd", Bytes: -1, Source: SrcKept, Guard: "some-odd-guard-token-name", Category: "git", RuleKey: "git/w@1"},
 	}
 }
 
 func fx4Model(rows []Row) Model {
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
-	return flat(m)
+	return flat(scanned(rows, fixtureSummary()))
 }
 
 func screen(m Model) string { return strings.Join(View(m, 100, 30), "\n") }
@@ -180,24 +185,24 @@ func TestSearchFindsKeptRowsOnlyWhileGIsOn(t *testing.T) {
 
 func TestHiddenHintLines(t *testing.T) {
 	s := screen(fx4Model(fx4Rows()))
-	for _, want := range []string{"optional (off): 2 | " + fmtBytes(50_000_000) + "+ | o", "kept: 2 | g"} {
+	for _, want := range []string{"switched off: 2 | " + fmtBytes(50_000_000) + "+ | o", "protected: 2 | g"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, s)
 		}
 	}
-	if s := strings.Join(View(fx4Model(fx4Rows()), 80, 24), "\n"); !strings.Contains(s, "optional (off): 2 | "+fmtBytes(50_000_000)+"+ | o  ") || !strings.Contains(s, "kept: 2 | g  ") {
+	if s := strings.Join(View(fx4Model(fx4Rows()), 80, 24), "\n"); !strings.Contains(s, "switched off: 2 | "+fmtBytes(50_000_000)+"+ | o  ") || !strings.Contains(s, "protected: 2 | g  ") {
 		t.Fatalf("hint lines are cut at 80 columns:\n%s", s)
 	}
 	known := fx4Rows()
 	known[3].Bytes = 10_000_000
-	if s := screen(fx4Model(known)); !strings.Contains(s, "optional (off): 2 | "+fmtBytes(60_000_000)+" | o") {
+	if s := screen(fx4Model(known)); !strings.Contains(s, "switched off: 2 | "+fmtBytes(60_000_000)+" | o") {
 		t.Fatalf("known sizes:\n%s", s)
 	}
 	m, _ := keys(fx4Model(fx4Rows()), "og")
-	if s := screen(m); strings.Contains(s, "optional (off)") || strings.Contains(s, "kept: ") {
+	if s := screen(m); strings.Contains(s, "switched off: ") || strings.Contains(s, "protected: 2") {
 		t.Fatalf("nothing is hidden, no hint expected:\n%s", s)
 	}
-	if s := screen(fx4Model(fx4Rows()[:1])); strings.Contains(s, "optional (off)") || strings.Contains(s, "kept: ") {
+	if s := screen(fx4Model(fx4Rows()[:1])); strings.Contains(s, "switched off: ") || strings.Contains(s, "protected: 1") {
 		t.Fatalf("no hidden rows, no hint expected:\n%s", s)
 	}
 }
@@ -205,7 +210,7 @@ func TestHiddenHintLines(t *testing.T) {
 func TestEmptyDefaultListSaysNothingIsReady(t *testing.T) {
 	r := fx4Rows()
 	s := screen(fx4Model([]Row{r[2], r[5]}))
-	for _, want := range []string{"nothing is ready to delete", "optional (off): 1 |", "kept: 1 | g"} {
+	for _, want := range []string{"nothing to remove here", "switched off: 1 |", "protected: 1 | g"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("empty list lacks %q:\n%s", want, s)
 		}
@@ -220,33 +225,33 @@ func TestKeptRowSaysWhy(t *testing.T) {
 		if _, known := guardWords[tok]; !known || word == "" {
 			t.Fatalf("no plain words for %q", tok)
 		}
-		if got := sourceText(r, false); got != "kept · "+word || cols(got) > 16 {
-			t.Fatalf("source of %q = %q", tok, got)
+		if got := labelText(r, false); got != "protected · "+word || cols(got) > labelW {
+			t.Fatalf("label of %q = %q", tok, got)
 		}
-		if got := sourceText(r, true); got != "kept-"+word || cols(got) > 16 {
-			t.Fatalf("plain source of %q = %q", tok, got)
+		if got := labelText(r, true); got != "protected-"+word || cols(got) > labelW {
+			t.Fatalf("plain label of %q = %q", tok, got)
 		}
 		if guardMeaning(tok) == "" {
 			t.Fatalf("no meaning for %q", tok)
 		}
 		m := fx4Model([]Row{r})
 		m, _ = keys(m, "g<enter>")
-		if s := screen(m); !strings.Contains(s, "kept-"+word) || !strings.Contains(s, guardMeaning(tok)) {
+		if s := screen(m); !strings.Contains(s, "protected-"+word) || !strings.Contains(s, guardMeaning(tok)) {
 			t.Fatalf("detail of %q:\n%s", tok, s)
 		}
 	}
 	odd := Row{Path: "/k", Source: SrcKept, Guard: "some-odd-guard-token-name"}
-	if got := sourceText(odd, true); !strings.HasPrefix(got, "kept-some") || !strings.HasSuffix(got, "...") || cols(got) > 16 {
-		t.Fatalf("unknown token source = %q", got)
+	if got := labelText(odd, true); !strings.HasPrefix(got, "protected-some") || !strings.HasSuffix(got, "...") || cols(got) > labelW {
+		t.Fatalf("unknown token label = %q", got)
 	}
-	if got := sourceText(odd, false); !strings.HasSuffix(got, "...") || cols(got) > 16 {
-		t.Fatalf("unknown token source = %q", got)
+	if got := labelText(odd, false); !strings.HasSuffix(got, "...") || cols(got) > labelW {
+		t.Fatalf("unknown token label = %q", got)
 	}
-	if guardMeaning("some-odd-guard-token-name") == "" || sourceText(Row{Source: SrcKept}, true) != "kept" {
+	if guardMeaning("some-odd-guard-token-name") == "" || labelText(Row{Source: SrcKept}, true) != "protected" {
 		t.Fatal("unknown or missing token must not panic or go empty")
 	}
 	m, _ := keys(fx4Model(fx4Rows()), "g")
-	if s := screen(m); !strings.Contains(s, "kept-dirty") || !strings.Contains(s, "? /a/kept-dirty") {
+	if s := screen(m); !strings.Contains(s, "protected-dirty") || !strings.Contains(s, "? /a/kept-dirty") {
 		t.Fatalf("kept rows in the g view:\n%s", s)
 	}
 }
@@ -262,10 +267,10 @@ func cursorPathOf(t *testing.T, m Model) string {
 
 func TestUnexcludeOfUnknownOriginStaysWhereItIs(t *testing.T) {
 	rows := []Row{
-		{Path: "/a", Bytes: 300, Source: SrcAuto},
+		{Path: "/a", Bytes: 300, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "/x", Bytes: 250, Source: SrcExcluded}, // no Base, no Origin: the scan gave no source
-		{Path: "/b", Bytes: 200, Source: SrcAuto},
-		{Path: "/c", Bytes: 100, Source: SrcAuto},
+		{Path: "/b", Bytes: 200, Source: SrcAuto, Label: core.LabelSafe},
+		{Path: "/c", Bytes: 100, Source: SrcAuto, Label: core.LabelSafe},
 	}
 	m := fx4Model(rows)
 	m, _ = keys(m, "j") // /a is first selectable; /x is next
@@ -290,16 +295,16 @@ func TestUnexcludeOfUnknownOriginStaysWhereItIs(t *testing.T) {
 		}
 	}
 	d, _ := keys(m, "<enter>")
-	if s := screen(d); !strings.Contains(s, "kept-refresh") {
+	if s := screen(d); !strings.Contains(s, "protected-refresh") {
 		t.Fatalf("detail:\n%s", s)
 	}
 }
 
 func TestUnexcludeOfOptionalOffRowStaysUntilTheCursorLeaves(t *testing.T) {
 	rows := []Row{
-		{Path: "/a", Bytes: 300, Source: SrcAuto},
+		{Path: "/a", Bytes: 300, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "/o", Bytes: 200, Source: SrcExcluded, Base: SrcOptionalOff},
-		{Path: "/b", Bytes: 100, Source: SrcAuto},
+		{Path: "/b", Bytes: 100, Source: SrcAuto, Label: core.LabelSafe},
 	}
 	m := fx4Model(rows)
 	m, _ = keys(m, "j")
@@ -321,8 +326,8 @@ func TestUnexcludeOfOptionalOffRowStaysUntilTheCursorLeaves(t *testing.T) {
 
 func TestTogglesAndEscKeepTheCursorOnTheSameRow(t *testing.T) {
 	rows := []Row{
-		{Path: "/b", Bytes: 20, Source: SrcAuto},
-		{Path: "/c", Bytes: 10, Source: SrcAuto},
+		{Path: "/b", Bytes: 20, Source: SrcAuto, Label: core.LabelSafe},
+		{Path: "/c", Bytes: 10, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "/a", Bytes: -1, Source: SrcKept, Guard: "dirty"},
 		{Path: "/a0", Bytes: 5, Source: SrcOptionalOff},
 	}
@@ -342,10 +347,10 @@ func TestTogglesAndEscKeepTheCursorOnTheSameRow(t *testing.T) {
 
 func TestOptionalHintIgnoresRowsThatStayBlocked(t *testing.T) {
 	rows := []Row{
-		{Path: "/a", Bytes: 1, Source: SrcAuto},
+		{Path: "/a", Bytes: 1, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "docker prune", Bytes: 99, Source: SrcOptionalOff, Block: "never from this screen"},
 	}
-	if s := screen(fx4Model(rows)); strings.Contains(s, "optional (off)") {
+	if s := screen(fx4Model(rows)); strings.Contains(s, "switched off: ") {
 		t.Fatalf("hint counts a row that o cannot make selectable:\n%s", s)
 	}
 }
@@ -353,8 +358,8 @@ func TestOptionalHintIgnoresRowsThatStayBlocked(t *testing.T) {
 func TestCursorStartsOnFirstSelectableRow(t *testing.T) {
 	rows := []Row{
 		{Path: "/a/excluded", Bytes: 900, Source: SrcExcluded, Base: SrcAuto},
-		{Path: "/a/blocked", Bytes: 800, Source: SrcAuto, Block: "cleaned by x"},
-		{Path: "/a/auto", Bytes: 100, Source: SrcAuto},
+		{Path: "/a/blocked", Bytes: 800, Source: SrcAuto, Label: core.LabelSafe, Block: "cleaned by x"},
+		{Path: "/a/auto", Bytes: 100, Source: SrcAuto, Label: core.LabelSafe},
 	}
 	m := fx4Model(rows)
 	if r, _ := m.cursorRow(); r.Path != "/a/auto" {
@@ -395,8 +400,8 @@ func TestSelectDeselectAndSelectAllSkipsDim(t *testing.T) {
 	}
 	m, _ = keys(m, "a")
 	for _, r := range m.visible() {
-		if m.Selected[r.Path] != r.selectable() {
-			t.Fatalf("a: %s selected=%v selectable=%v", r.Path, m.Selected[r.Path], r.selectable())
+		if m.Selected[r.Path] != isReady(r) {
+			t.Fatalf("a: %s selected=%v safe or recommended=%v", r.Path, m.Selected[r.Path], isReady(r))
 		}
 	}
 	if m.Selected["/home/user/old/node_modules"] {
@@ -436,8 +441,12 @@ func TestOptionalOffGroupToggle(t *testing.T) {
 		t.Fatalf("o: found=%v preselected=%v", found, m.Selected)
 	}
 	m, _ = keys(m, "a")
+	if m.Selected["/home/user/old/node_modules"] {
+		t.Fatal("a must not select a row of a switched off category")
+	}
+	m, _ = keys(m, "jj ") // the third row by size
 	if !m.Selected["/home/user/old/node_modules"] {
-		t.Fatal("a with o on selects the optional-off row")
+		t.Fatal("space selects the switched off row")
 	}
 	m, _ = keys(m, "o")
 	if !m.Selected["/home/user/old/node_modules"] {
@@ -594,7 +603,7 @@ func TestFilter(t *testing.T) {
 
 func TestSelectedHiddenByFilterStaysInTheDeleteList(t *testing.T) {
 	m, _ := keys(listModel(), "a/docker<enter>d")
-	want := []string{"/home/user/.cache/go-build", "/home/user/proj/node_modules", "docker:abc123", "docker:def456",
+	want := []string{"/home/user/.cache/go-build", "/home/user/proj/node_modules",
 		"/home/user/a/very/long/directory/name/that/does/not/fit/in/the/path/column/of/the/list/target", "/home/user/zz"}
 	if m.Screen != ScreenConfirm || !reflect.DeepEqual(m.Confirm, want) {
 		t.Fatalf("confirm = %v", m.Confirm)

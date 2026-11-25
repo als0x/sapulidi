@@ -85,9 +85,22 @@ func runTUIWith(app *App, deps tui.Deps) int {
 	return fail(app, "tui", err)
 }
 
+// tuiNotice is the update notice from the cache, or ""; it makes no request and starts no check.
+func tuiNotice() string {
+	paths, err := config.ResolvePaths()
+	if err != nil {
+		return ""
+	}
+	cfg, _, err := config.Load(paths.Config)
+	if err != nil || !updateCheckEnabled(cfg) {
+		return ""
+	}
+	return updateNotice(paths.State, install.Marketplace)
+}
+
 // tuiFacts reads what the summary panel shows besides the scan; whatever is unavailable stays zero.
 func tuiFacts(st *state.Store) tui.Facts {
-	f := tui.Facts{Paused: st.Paused()}
+	f := tui.Facts{Paused: st.Paused(), Notice: tuiNotice()}
 	if home, err := os.UserHomeDir(); err == nil {
 		if p, err := config.ResolvePaths(); err == nil {
 			env := &install.Env{Home: home, Data: p.Data, Plugin: sapulidi.Plugin}

@@ -3,7 +3,7 @@ size       2.9 GB
 created    2025-01-10 (22mo)
 updatedAt  2026-11-01
 category   go | go/go-build@1
-source     auto
+label      safe
 why        Go build cache not used for 20 days
 
 guards that passed
@@ -21,4 +21,4 @@ largest inside
 
 
 
-esc: back  space: select  x: exclude  d: delete
+esc: back  space: toggle  x: exclude  d: delete

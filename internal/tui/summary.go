@@ -25,6 +25,7 @@ type Facts struct {
 	Interval time.Duration // schedule interval; 0 = no job installed
 	NextIn   string        // time until the next run as the scheduler reports it, e.g. "12m34s"; "" = unknown
 	Paused   bool
+	Notice   string // the update notice from the cached check; "" = none
 }
 
 // EngineDeps is the Deps of the real program: it scans and deletes through the engine and nothing else.
@@ -122,7 +123,20 @@ func (e *EngineDeps) Scan(ctx context.Context, progress func(category string, do
 	}
 	e.bases = withResolved(cleanBases(append(slices.Clone(env.Platform.ScratchBases()), env.TempDir)))
 	e.planEnv, e.plan = cp, sum // kept for the second phase, Uncovered
-	return rowsOf(sum), nil
+	rows := rowsOf(sum)
+	setLocations(rows, cp.Rules)
+	return rows, nil
+}
+
+// setLocations gives every row the location of its rule.
+func setLocations(rows []Row, rules []core.Rule) {
+	at := map[string]string{}
+	for _, r := range rules {
+		at[r.Key()] = r.Location
+	}
+	for i := range rows {
+		rows[i].Location = at[rows[i].RuleKey]
+	}
 }
 
 // Summary implements Deps.
@@ -134,7 +148,7 @@ func (e *EngineDeps) Summary() SummaryData {
 	}
 	if e.Facts != nil {
 		f := e.Facts()
-		s.Agents, s.Interval, s.Paused = f.Agents, f.Interval, f.Paused
+		s.Agents, s.Interval, s.Paused, s.Notice = f.Agents, f.Interval, f.Paused, f.Notice
 		if d, err := time.ParseDuration(f.NextIn); err == nil && f.Interval > 0 {
 			s.Next = s.Now.Add(d)
 		}
@@ -194,7 +208,9 @@ func rowsOf(s engine.Summary) []Row {
 	var rows []Row
 	noOrigin := map[string]bool{}
 	ruleSource := map[string]string{} // a Kept row has no source: it takes the one of its rule's candidates
+	ruleLabel := map[string]core.Label{}
 	for _, c := range s.WouldRemove {
+		ruleLabel[c.RuleKey] = c.Label
 		wholesale := c.Path == "" || isWholesale(c)
 		if wholesale {
 			delete(ruleSource, c.RuleKey)
@@ -207,7 +223,7 @@ func rowsOf(s engine.Summary) []Row {
 			rows = append(rows, wholesaleRow(c))
 		default:
 			rows = append(rows, Row{Path: c.Path, Bytes: c.Bytes, Created: c.Created, Updated: c.Updated,
-				Source: sourceOf(c.Source), Origin: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason})
+				Source: sourceOf(c.Source), Origin: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Label: c.Label, Why: c.Reason})
 		}
 	}
 	for _, k := range s.Kept {
@@ -215,10 +231,10 @@ func rowsOf(s engine.Summary) []Row {
 			continue
 		}
 		row := Row{Path: k.Path, Bytes: -1, Source: SrcKept, Category: k.Category, RuleKey: k.RuleKey,
-			Why: "kept by a guard: " + k.Why, Guard: k.Why}
+			Why: "protected by a guard: " + k.Why, Guard: k.Why}
 		if k.Why == "excluded" {
 			row.Source, row.Why = SrcExcluded, excludedReason
-			row.Origin = ruleSource[k.RuleKey]
+			row.Origin, row.Label = ruleSource[k.RuleKey], ruleLabel[k.RuleKey]
 		}
 		rows = append(rows, row)
 	}
@@ -255,6 +271,6 @@ func wholesaleRow(c core.Candidate) Row {
 	if c.Category == "containers" {
 		block = containersReason
 	}
-	return Row{Path: cmd, Bytes: c.Bytes, Source: sourceOf(c.Source), Origin: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Why: c.Reason,
+	return Row{Path: cmd, Bytes: c.Bytes, Source: sourceOf(c.Source), Origin: sourceOf(c.Source), Category: c.Category, RuleKey: c.RuleKey, Label: c.Label, Why: c.Reason,
 		Block: block}
 }

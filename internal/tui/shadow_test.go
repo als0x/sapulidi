@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 // The helpers below track the selection with rules written from the spec, never from Model.selected(): the property
@@ -14,7 +16,26 @@ func isSel(r Row) bool {
 	return r.Block == "" && (r.Source == "auto" || r.Source == "optional-on" || r.Source == "optional-off")
 }
 
-func isReady(r Row) bool { return r.Block == "" && (r.Source == "auto" || r.Source == "optional-on") }
+// isReady is a selectable row whose label is exactly safe or recommended and whose category is not switched off.
+func isReady(r Row) bool {
+	return r.Block == "" && (r.Source == "auto" || r.Source == "optional-on") &&
+		(r.Label == "safe" || r.Label == "recommended")
+}
+
+// hostileRows are rows whose label and source disagree, or whose label nobody knows.
+func hostileRows() []Row {
+	row := func(path, src string, l core.Label) Row {
+		return Row{Path: path, Bytes: 1000, Source: src, Label: l, Category: "misc", RuleKey: "misc/h@1"}
+	}
+	return []Row{
+		row("/h/auto-your-call", SrcAuto, core.LabelYourCall),
+		row("/h/auto-protected", SrcAuto, core.LabelProtected),
+		row("/h/optional-safe", SrcOptionalOn, core.LabelSafe),
+		row("/h/auto-unknown", SrcAuto, "bogus"),
+		row("/h/auto-no-label", SrcAuto, ""),
+		row("/h/off-safe", SrcOptionalOff, core.LabelSafe),
+	}
+}
 
 // shadowKey applies a key press to want. prev is the model before the key; it only says what the key targets
 // (the row or place under the cursor, the rows or places in view).
@@ -118,14 +139,20 @@ func shadowKey(want map[string]bool, sp *string, prev Model, key string) {
 				ready = append(ready, r.Path)
 			}
 		}
-		toggle(ready)
+		if key == " " {
+			toggle(ready)
+			return
+		}
+		for _, p := range ready { // `a` only selects
+			want[p] = true
+		}
 	case ScreenList:
 		if key == " " {
 			cursorRow()
 			return
 		}
 		for _, r := range prev.visible() {
-			if isSel(r) {
+			if isReady(r) {
 				want[r.Path] = true
 			}
 		}
@@ -262,7 +289,7 @@ func checkConfirmText(t *testing.T, ctx string, m Model, want map[string]bool) {
 		noun = "item"
 	}
 	head := fmt.Sprintf("Delete %d %s, %s in total?", n, noun, sizeText(known, unknown))
-	optLine := fmt.Sprintf("%d of them are optional and currently switched off.", optOff)
+	optLine := fmt.Sprintf("%d of them are in categories you switched off.", optOff)
 	hideLine := fmt.Sprintf("%d of them are not shown in the list you came from.", distinct(hidden))
 
 	for _, sz := range [][2]int{{300, 400}, {80, 24}} {

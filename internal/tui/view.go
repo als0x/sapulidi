@@ -3,12 +3,17 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 const (
 	minWidth  = 80
 	minHeight = 24
 )
+
+// labelW is the width of the label column of a list: "protected · unignored".
+const labelW = 21
 
 var sortNames = [...]string{"size, largest first", "age, oldest first", "updatedAt, stalest first", "path"}
 
@@ -135,15 +140,16 @@ func hiddenLines(m Model) []string {
 			size += "+"
 		}
 		d := dot(m.Plain)
-		out = append(out, fmt.Sprintf("optional (off): %d %s %s %s o", optN, d, size, d))
+		out = append(out, fmt.Sprintf("switched off: %d %s %s %s o", optN, d, size, d))
 	}
 	if keptN > 0 {
-		out = append(out, fmt.Sprintf("kept: %d %s g", keptN, dot(m.Plain)))
+		out = append(out, fmt.Sprintf("protected: %d %s g", keptN, dot(m.Plain)))
 	}
 	return out
 }
 
-func summaryLines(m Model) []string {
+// summaryLines are the lines of the summary box, whose inside is w columns wide.
+func summaryLines(m Model, w int) []string {
 	var excluded, selectable int
 	for _, r := range m.Rows {
 		if r.Source == SrcExcluded {
@@ -178,7 +184,7 @@ func summaryLines(m Model) []string {
 	}
 	d := dot(m.Plain)
 	lines := []string{
-		headline(m),
+		headline(m, w),
 		fmt.Sprintf("to remove: %s, %d of %d selected %s excluded: %d", total, len(sel), selectable, d, excluded),
 		fmt.Sprintf("agents installed: %d %s %s", m.Summary.Agents, d, sched),
 		disk,
@@ -187,29 +193,42 @@ func summaryLines(m Model) []string {
 	if u := unknownLine(m); u != "" {
 		lines = append(lines, u)
 	}
+	if n := m.Summary.Notice; n != "" {
+		if cols(n) > w { // a cut command would mislead
+			n = "a new version is out: run sapulidi version"
+		}
+		lines = append(lines, n)
+	}
 	return lines
 }
 
-// headline answers the first question: how much can go now, how much if the user chooses, how much is protected.
-// The three numbers come from m.Rows. A wholesale command row and an excluded row are in none of them: neither can be
-// deleted from here. A separate excluded count would not fit the 76 columns of the box at 80x24 next to them.
-func headline(m Model) string {
-	var autoB, optB int64
-	var autoU, optU bool
+// headline answers the first question: how much is safe to free, how much is recommended, how much is the user's
+// call and how many rows are protected. It uses shorter words when it does not fit w columns. A wholesale command
+// row and an excluded row are in none of the numbers: neither can be deleted from here.
+func headline(m Model, w int) string {
+	var safe, rec, call tally
 	var kept int
 	for _, r := range m.Rows {
 		switch {
 		case r.Source == SrcKept:
 			kept++
-		case readyRow(r):
-			addBytes(&autoB, &autoU, r.Bytes)
-		case r.selectable():
-			addBytes(&optB, &optU, r.Bytes)
+		case !r.selectable():
+		case r.label() == core.LabelSafe:
+			safe.add(r.Bytes)
+		case r.label() == core.LabelRecommended:
+			rec.add(r.Bytes)
+		default:
+			call.add(r.Bytes)
 		}
 	}
-	d := dot(m.Plain)
-	return fmt.Sprintf("Free now: %s automatic %s %s if you choose %s %d protected",
-		sizeCell(1, autoB, autoU), d, sizeCell(1, optB, optU), d, kept)
+	d := " " + dot(m.Plain) + " "
+	size := func(t tally) string { return sizeCell(1, t.Bytes, t.Unknown) }
+	s := "Free now: " + size(safe) + " safe" + d + size(rec) + " recommended" + d + size(call) + " your call" + d +
+		fmt.Sprintf("%d protected", kept)
+	if cols(s) <= w {
+		return s
+	}
+	return size(safe) + " safe" + d + size(rec) + " rec." + d + size(call) + " your call" + d + fmt.Sprintf("%d kept", kept)
 }
 
 // unknownLine is the summary line of the folders no rule covers; "" when there are none and the search finished.
@@ -247,10 +266,10 @@ func unknownTotal(m Model) string {
 	return sizeCell(1, total, m.Summary.UnknownPartial)
 }
 
-// legend explains the words of the list; first is the word of the removable-now column ("ready" or "auto").
-func legend(m Model, first string) string {
-	d := dot(m.Plain)
-	return first + " = removable now " + d + " optional = you pick it " + d + " kept = protected"
+// legend explains the four labels.
+func legend(m Model) string {
+	d := " " + dot(m.Plain) + " "
+	return "safe, recommended: preselected" + d + "your call: you pick" + d + "protected: stays"
 }
 
 // footerOf is the one-line keys footer of the current screen.
@@ -265,28 +284,28 @@ func footerOf(m Model) string {
 	}
 	switch m.Screen {
 	case ScreenPlaces:
-		return join("enter open", "space select", "d delete", "g protected", "c view", "? help", "q quit")
+		return join("enter open", "space toggle", "d delete", "g protected", "c view", "? help", "q quit")
 	case ScreenPlace:
-		return join("esc back", "enter detail", "space select", "x exclude", "d delete", "? help", "q quit")
+		return join("esc back", "enter detail", "space toggle", "x exclude", "d delete", "? help", "q quit")
 	case ScreenHelp:
 		return join("up/down scroll", "esc or ? close", "q quit")
 	case ScreenUnknown:
 		return join("up/down scroll", "esc back", "? help", "q quit")
 	}
-	return join("enter detail", "space select", "d delete", "o optional", "c view", "? help", "q quit")
+	return join("enter detail", "space toggle", "d delete", "o off rows", "c view", "? help", "q quit")
 }
 
 // topPanels draws the summary at the full width of the window.
 func topPanels(m Model, w int) []string {
-	return panel(m.Plain, "summary", summaryLines(m), w)
+	return panel(m.Plain, "summary", summaryLines(m, w-4), w)
 }
 
 func viewList(m Model, w, h int) []string {
 	lines := topPanels(m, w)
 
-	pw := w - 49
-	head := " " + "    " + fitRight("size", 9) + " " + fit("path", pw) + " " + fit("age", 5) + " " + fit("updatedAt", 10) + " " + fit("source", 16)
-	lines = append(lines, style(m.Plain, "1", head), cut("  "+legend(m, "auto"), w))
+	pw := w - 33 - labelW
+	head := " " + "    " + fitRight("size", 9) + " " + fit("path", pw) + " " + fit("age", 5) + " " + fit("updatedAt", 10) + " " + fit("label", labelW)
+	lines = append(lines, style(m.Plain, "1", head), cut("  "+legend(m), w))
 
 	vis := m.visible()
 	rowsH := h - len(lines) - 2
@@ -295,7 +314,7 @@ func viewList(m Model, w, h int) []string {
 		if m.Filter != "" {
 			lines = append(lines, "  nothing matches the search (esc clears it)")
 		} else {
-			lines = append(lines, "  nothing is ready to delete")
+			lines = append(lines, "  nothing to remove here")
 			for _, l := range hiddenLines(m) {
 				lines = append(lines, "  "+l)
 			}
@@ -323,7 +342,7 @@ func listRow(m Model, r Row, cur bool, pw int) string {
 	}
 	line := mark + box + " " + fitRight(fmtBytes(r.Bytes), 9) + " " + fit(shorten(r.Path, pw), pw) + " " +
 		fit(fmtAge(r.Created, m.Summary.Now), 5) + " " + fit(fmtDate(r.Updated), 10) + " " +
-		fit(sourceText(r, m.Plain), 16)
+		fit(labelText(r, m.Plain), labelW)
 	switch {
 	case cur:
 		return style(m.Plain, "7", line)
@@ -384,9 +403,9 @@ func viewDetail(m Model, w, h int) []string {
 	add("created", fmtDate(r.Created)+" ("+fmtAge(r.Created, m.Summary.Now)+")")
 	add("updatedAt", fmtDate(r.Updated))
 	add("category", r.Category+" "+dot(m.Plain)+" "+r.RuleKey)
-	add("source", sourceText(r, m.Plain))
+	add("label", labelText(r, m.Plain))
 	if r.Source == SrcKept && r.Guard != "" {
-		add("kept", guardMeaning(r.Guard))
+		add("protected", guardMeaning(r.Guard))
 	}
 	if len(r.Members) > 0 {
 		add("members", fmt.Sprintf("%d", len(r.Members)))
@@ -412,7 +431,7 @@ func viewDetail(m Model, w, h int) []string {
 		}
 		lines = append(lines, "  "+fitRight(fmtBytes(c.Bytes), 9)+"  "+shorten(c.Name, w-13))
 	}
-	footer := "esc: back  space: select  x: exclude  d: delete"
+	footer := "esc: back  space: toggle  x: exclude  d: delete"
 	if m.Status != "" {
 		footer = m.Status
 	}
@@ -486,7 +505,7 @@ func confirmParts(m Model, w int) (head, entries []string) {
 	}
 	head = []string{fmt.Sprintf("Delete %d %s, %s in total?", len(paths), noun, sizeText(known, unknown))}
 	if optOff > 0 {
-		head = append(head, fmt.Sprintf("%d of them are optional and currently switched off.", optOff))
+		head = append(head, fmt.Sprintf("%d of them are in categories you switched off.", optOff))
 	}
 	if n := len(deletePaths(m.notInView(rows))); n > 0 {
 		head = append(head, fmt.Sprintf("%d of them are not shown in the list you came from.", n))
@@ -535,7 +554,7 @@ func viewResult(m Model, w, h int) []string {
 		lines = append(lines, "error: "+shorten(r.Err, w-7))
 	}
 	if len(r.Kept) > 0 {
-		lines = append(lines, "", fmt.Sprintf("Kept by a guard (%d):", len(r.Kept)))
+		lines = append(lines, "", fmt.Sprintf("Protected by a guard (%d):", len(r.Kept)))
 		for _, k := range r.Kept {
 			why := cut(k.Why, w/2)
 			lines = append(lines, "  "+shorten(k.Path, w-6-cols(why))+"  "+why)

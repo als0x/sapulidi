@@ -30,7 +30,7 @@ func realMachineRows() []Row {
 
 // modelOf is a model after the scan AND its second phase: the uncovered folders of s have arrived.
 func modelOf(rows []Row, s SummaryData) Model {
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: s})
+	m := scanned(rows, s)
 	m, _ = Update(m, UncoveredMsg{Unknown: s.Unknown, Partial: s.UnknownPartial})
 	return m
 }
@@ -47,23 +47,23 @@ func TestHeadline(t *testing.T) {
 		rows []Row
 		want string
 	}{
-		{"real machine", realMachineRows(), "Free now: 0 B automatic | 1.2 GB if you choose | 155 protected"},
-		{"ready rows", []Row{
-			{Path: "/a/x", Bytes: gib, Source: SrcAuto}, {Path: "/a/y", Bytes: gib, Source: SrcOptionalOn},
+		{"real machine", realMachineRows(), "Free now: 0 B safe | 0 B recommended | 1.2 GB your call | 155 protected"},
+		{"every label", []Row{
+			{Path: "/a/x", Bytes: gib, Source: SrcAuto, Label: core.LabelSafe}, {Path: "/a/y", Bytes: gib, Source: SrcOptionalOn, Label: core.LabelRecommended},
 			{Path: "/b/z", Bytes: gib / 2, Source: SrcOptionalOff},
-		}, "Free now: 2.0 GB automatic | 512.0 MB if you choose | 0 protected"},
+		}, "1.0 GB safe | 1.0 GB rec. | 512.0 MB your call | 0 kept"},
 		{"unknown sizes", []Row{
-			{Path: "/a/x", Bytes: gib, Source: SrcAuto}, {Path: "/a/y", Bytes: -1, Source: SrcAuto},
+			{Path: "/a/x", Bytes: gib, Source: SrcAuto, Label: core.LabelSafe}, {Path: "/a/y", Bytes: -1, Source: SrcAuto, Label: core.LabelSafe},
 			{Path: "/b/z", Bytes: -1, Source: SrcOptionalOff},
-		}, "Free now: 1.0 GB+ automatic | 0 B+ if you choose | 0 protected"},
-		{"nothing", nil, "Free now: 0 B automatic | 0 B if you choose | 0 protected"},
+		}, "Free now: 1.0 GB+ safe | 0 B recommended | 0 B+ your call | 0 protected"},
+		{"nothing", nil, "Free now: 0 B safe | 0 B recommended | 0 B your call | 0 protected"},
 	} {
 		m := modelOf(c.rows, placesSummary())
 		for _, scr := range []Model{m, flat(m)} {
 			if got := View(scr, 80, 24); !strings.Contains(strings.Join(got, "\n"), c.want) {
 				t.Errorf("%s: headline %q missing in\n%s", c.name, c.want, strings.Join(got, "\n"))
 			}
-			if got := summaryLines(scr)[0]; got != c.want {
+			if got := summaryLines(scr, 76)[0]; got != c.want {
 				t.Errorf("%s: first summary line %q", c.name, got)
 			}
 		}
@@ -72,31 +72,32 @@ func TestHeadline(t *testing.T) {
 
 func TestEmptyReadyMessageExactlyWhenNothingReadyAndSomethingOptional(t *testing.T) {
 	got := strings.Join(View(modelOf(realMachineRows(), placesSummary()), 80, 24), "\n")
-	for _, part := range []string{"nothing is ready to delete automatically;", "1.2 GB can be chosen by hand: press enter on a place"} {
+	for _, part := range []string{"nothing is safe or recommended to remove;", "1.2 GB is your call: press enter on a place"} {
 		if !strings.Contains(got, part) {
 			t.Errorf("message part %q missing at 80x24:\n%s", part, got)
 		}
 	}
-	ready := append(realMachineRows(), Row{Path: "/home/user/r/go", Bytes: gib, Source: SrcAuto})
-	if got := screen(modelOf(ready, placesSummary())); strings.Contains(got, "nothing is ready to delete automatically") {
+	ready := append(realMachineRows(), Row{Path: "/home/user/r/go", Bytes: gib, Source: SrcAuto, Label: core.LabelSafe})
+	if got := screen(modelOf(ready, placesSummary())); strings.Contains(got, "nothing is safe or recommended") {
 		t.Errorf("a ready row exists:\n%s", got)
 	}
 	keptOnly := []Row{{Path: "/home/user/k", Bytes: -1, Source: SrcKept, Guard: "dirty"}}
-	if got := screen(modelOf(keptOnly, placesSummary())); strings.Contains(got, "nothing is ready to delete automatically") {
+	if got := screen(modelOf(keptOnly, placesSummary())); strings.Contains(got, "nothing is safe or recommended") {
 		t.Errorf("no optional row exists:\n%s", got)
 	}
-	if got := screen(modelOf(nil, placesSummary())); strings.Contains(got, "nothing is ready to delete automatically") || !strings.Contains(got, "nothing is ready to delete") {
+	if got := screen(modelOf(nil, placesSummary())); strings.Contains(got, "nothing is safe or recommended") || !strings.Contains(got, "nothing to remove here") {
 		t.Errorf("empty keeps its own text:\n%s", got)
 	}
 }
 
 func TestLegendOnPlacesAndFlatList(t *testing.T) {
+	const want = "safe, recommended: preselected | your call: you pick | protected: stays"
 	places := strings.Join(View(placesModel(), 80, 24), "\n")
-	if !strings.Contains(places, "ready = removable now | optional = you pick it | kept = protected") {
+	if !strings.Contains(places, want) {
 		t.Errorf("places legend:\n%s", places)
 	}
 	list := strings.Join(View(listModel(), 80, 24), "\n")
-	if !strings.Contains(list, "auto = removable now | optional = you pick it | kept = protected") {
+	if !strings.Contains(list, want) {
 		t.Errorf("list legend:\n%s", list)
 	}
 }
@@ -280,6 +281,8 @@ func TestPlacesAreUsableWhileTheUncoveredSearchRuns(t *testing.T) {
 	ft.waitFor(t, "searching") // the places are on screen and the summary says the search is running
 	ft.waitFor(t, "enter to look inside")
 	ft.keys(" ")
+	ft.waitFor(t, "y: yes") // a place with only "your call" rows asks first
+	ft.keys("y")
 	ft.waitFor(t, "[x]")
 	ft.keys("u")
 	ft.waitFor(t, "not searched yet")
@@ -498,14 +501,11 @@ func TestHelpClaimsMatchTheKeys(t *testing.T) {
 	if inOld.Place != "~/old/" || inOld.Selected[optOff] {
 		t.Errorf("place a selected an optional row: %v in %q", inOld.Selected, inOld.Place)
 	}
-	// a: in the flat list every selectable row in view, optional ones once o shows them
-	list := mustKeys(flat(placesModel()), "a")
-	if list.Selected[optOff] {
-		t.Error("flat a selected a row o has not shown")
-	}
-	list = mustKeys(flat(placesModel()), "oa")
-	if !list.Selected[optOff] {
-		t.Error("flat a after o must select the optional row")
+	// a: in the flat list the safe and recommended rows in view, never a your call one, shown by o or not
+	for _, script := range []string{"a", "oa"} {
+		if list := mustKeys(flat(placesModel()), script); list.Selected[optOff] || len(list.Selected) == 0 {
+			t.Errorf("flat %s: %v", script, list.Selected)
+		}
 	}
 	// o: the flat list toggles, the places say they always list them
 	if !mustKeys(flat(placesModel()), "o").ShowOptional {
@@ -526,10 +526,10 @@ func TestHelpClaimsMatchTheKeys(t *testing.T) {
 		t.Errorf("x on the places: %q", got.Status)
 	}
 	for _, claim := range []string{
-		"places: select the ready rows of the places in view",
-		"inside a place: its ready rows; flat list: every row in view",
-		"(optional ones too once o shows them)",
-		"flat list: show or hide optional rows (places always list them)",
+		"select the safe and recommended rows in view, never your call",
+		"a never deselects, space does",
+		"At start every safe and recommended row is selected.",
+		"flat list: show or hide the rows of switched off categories",
 		"exclude the row under the cursor (flat list, inside a place)",
 		"on the places, open a place first",
 		"u      folders that no rule covers",

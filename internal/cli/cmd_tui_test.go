@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/als0x/sapulidi/internal/tui"
 )
@@ -24,6 +25,24 @@ func (noTermDeps) RemoveExclusion(string) error                { return nil }
 func TestTUIIsRegistered(t *testing.T) {
 	if TUI == nil {
 		t.Fatal("cli.TUI is not set")
+	}
+}
+
+func TestTUINoticeReadsTheCacheOnly(t *testing.T) {
+	e := newUpdateEnv(t)
+	if n := tuiNotice(); n != "" {
+		t.Fatalf("no cache: %q", n)
+	}
+	e.cache(t, "v0.4.0", 100*time.Hour) // stale: the TUI still shows it and starts no check
+	if n := tuiNotice(); !strings.Contains(n, "v0.4.0") {
+		t.Fatalf("notice %q", n)
+	}
+	e.config(t, "[update]\ncheck = false\n")
+	if n := tuiNotice(); n != "" {
+		t.Fatalf("check off: %q", n)
+	}
+	if e.started != 0 {
+		t.Fatalf("started %d checks", e.started)
 	}
 }
 

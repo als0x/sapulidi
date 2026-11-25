@@ -1,18 +1,18 @@
 +- summary ------------------------------------------------------------------------------------------------------------+
-| Free now: 1.9 GB automatic | 762.9 MB if you choose | 3 protected                                                    |
+| Free now: 762.9 MB safe | 1.1 GB recommended | 762.9 MB your call | 3 protected                                      |
 | to remove: 1.9 GB, 3 of 4 selected | excluded: 2                                                                     |
 | agents installed: 2 | schedule: every 30m, next 14:30                                                                |
 | disk free: 37.3 GB -> 39.1 GB                                                                                        |
-| kept: 3 | g                                                                                                          |
+| protected: 3 | g                                                                                                     |
 | not covered by any rule: searching...                                                                                |
 +----------------------------------------------------------------------------------------------------------------------+
-         ready  optional place                                                                          kept updatedAt 
-  ready = removable now | optional = you pick it | kept = protected
- [x]    1.1 GB         - ~/proj/                                                                           1 2026-11-21
- [x]  762.9 MB         - ~/.nvm/versions/node/                                                             1 2026-11-20
->[ ]         -  762.9 MB ~/old/                                                                            - 2025-02-03
- [-]         -         - commands | docker                                                                 - -         
- [-]         -         - ~/ex/                                                                             - -         
+          safe recommended your call place                                                          protected updatedAt 
+  safe, recommended: preselected | your call: you pick | protected: stays
+ [x]         -      1.1 GB         - ~/proj/                                                                1 2026-11-21
+ [x]  762.9 MB           -         - ~/.nvm/versions/node/                                                  1 2026-11-20
+>[ ]         -           -  762.9 MB ~/old/                                                                 - 2025-02-03
+ [-]         -           -         - commands | docker                                                      - -         
+ [-]         -           -         - ~/ex/                                                                  - -         
 
 
 
@@ -36,5 +36,5 @@
 
 
 
-Select all 1 optional row in ~/old/ (762.9 MB)?  y: yes | n / esc: no
+Select 1 row (your call) in ~/old/ (762.9 MB)?  y: yes | n / esc: no
 y yes | n or esc no

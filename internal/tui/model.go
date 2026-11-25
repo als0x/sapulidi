@@ -150,6 +150,7 @@ type SummaryData struct {
 	Roots    []string      // project roots of the scan; a row under one belongs to the longest match
 	Bases    []string      // agent scratch bases and the temp dir; rows under one (and no root) share its place
 	Home     string        // the home directory, shown as ~ in places
+	Notice   string        // a newer release and how to get it; "" = none
 
 	Unknown        []Uncovered // big folders no rule covers, largest first, at most 20
 	UnknownPartial bool        // the search for them ran out of time or was cancelled
