@@ -225,6 +225,21 @@ func TestKnownLimitsCoverUpdatesAndRecommendedRules(t *testing.T) {
 	}
 }
 
+func TestReadmeShowsThePlacesFixture(t *testing.T) {
+	screen := readRepoFile(t, "internal/tui/testdata/labels_places_80x24.golden")
+	if !strings.Contains(readRepoFile(t, "README.md"), "```text\n"+screen+"```\n") {
+		t.Error("README.md does not show labels_places_80x24.golden as it is")
+	}
+}
+
+func TestDocsSayWhoMayWidenTheSchedule(t *testing.T) {
+	requireIn(t, "README.md Limits", section(t, readRepoFile(t, "README.md"), "Limits"),
+		"container prunes", "idle VM stop", "never removed from the TUI", "exact rule key", "terminal")
+	requireIn(t, "known-limits.md", readRepoFile(t, "docs/known-limits.md"), "HTTPS_PROXY", "SSL_CERT_FILE")
+	requireIn(t, "SKILL.md", readRepoFile(t, "skills/sapulidi/SKILL.md"),
+		"Never set `SAPULIDI_RELEASE_BASE` or `SAPULIDI_RAW_BASE`", "Never run `--recommended` consent")
+}
+
 func TestSkillSizeLimits(t *testing.T) {
 	root := repoRoot()
 	check := func(rel string, limit int) {

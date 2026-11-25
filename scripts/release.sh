@@ -2,11 +2,12 @@
 # Prepare a release. Run by the owner, never by CI.
 # usage: scripts/release.sh <version> [--dry-run]
 # The binaries check for updates in one GitHub repository: SAPULIDI_REPO=owner/repo, or the one the origin remote names.
-# Bumps the version in the launcher, install.sh and every manifest (the binary embeds them), builds the four
+# Bumps the version in the launcher, install.sh, the install.sh addresses in README.md and every manifest (the binary
+# embeds the launcher and the manifests), builds the four
 # binaries from that tree the same way the release workflow does, writes checksums.txt, and only then runs tests/run.sh. It prints the commit,
 # tag and push commands; it never commits, tags or pushes. The tree must be clean at the start. If any step fails, including the
-# suite, a trap runs git checkout on exactly the files it changed (bin/sapulidi, install.sh, checksums.txt and the
-# manifests) and removes dist/, so the tree is as it was found.
+# suite, a trap runs git checkout on exactly the files it changed (bin/sapulidi, install.sh, checksums.txt, README.md
+# and the manifests) and removes dist/, so the tree is as it was found.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -35,7 +36,7 @@ if ! [[ $version =~ $version_re ]]; then
 fi
 
 manifests=".claude-plugin/plugin.json .claude-plugin/marketplace.json .codex-plugin/plugin.json .cursor-plugin/plugin.json .antigravity-plugin/plugin.json"
-changed="bin/sapulidi install.sh checksums.txt $manifests"
+changed="bin/sapulidi install.sh checksums.txt README.md $manifests"
 targets="darwin/arm64 darwin/amd64 linux/arm64 linux/amd64"
 mod=github.com/als0x/sapulidi
 
@@ -63,6 +64,7 @@ echo "  1. set SAPULIDI_VERSION=$version in bin/sapulidi and install.sh (the bin
 for f in $manifests; do
 	echo "  2. set \"version\": \"$version\" in $f"
 done
+echo "  2. pin every vX.Y.Z/install.sh address in README.md to v$version"
 echo "  3. check install.sh, bin/sapulidi and the manifests carry the new version"
 echo "  4. build into dist/ from the bumped tree (CGO_ENABLED=0, GOAMD64=v1, -trimpath -buildvcs=false)"
 echo "     with updates checked in the repository ${repo:-(none)}:"
@@ -133,6 +135,7 @@ replace install.sh "s/^SAPULIDI_VERSION=.*/SAPULIDI_VERSION=$version/"
 for f in $manifests; do
 	replace "$f" "s/\"version\": \"[^\"]*\"/\"version\": \"$version\"/"
 done
+replace README.md "s#v[0-9][0-9A-Za-z.-]*/install\.sh#v$version/install.sh#g"
 
 # Nothing is built until the launcher, install.sh and every manifest carry the new version.
 pin_launcher=$(sed -n 's/^SAPULIDI_VERSION=//p' bin/sapulidi)

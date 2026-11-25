@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -54,12 +55,12 @@ func TestSetupYesRecordsConsent(t *testing.T) {
 		want     []string
 	}{
 		"no terminal":      {args: []string{"setup", "--yes"}, want: safe},
-		"flag":             {args: []string{"setup", "--yes", "--recommended"}, want: both},
+		"flag":             {args: []string{"setup", "--yes", "--recommended"}, terminal: true, typed: "allow\n", want: both},
 		"terminal y":       {args: []string{"setup", "--yes"}, terminal: true, typed: "y\n", want: both},
 		"terminal n":       {args: []string{"setup", "--yes"}, terminal: true, typed: "n\n", want: safe},
 		"terminal enter":   {args: []string{"setup", "--yes"}, terminal: true, typed: "\n", want: safe},
 		"json never asks":  {args: []string{"--json", "setup", "--yes"}, terminal: true, typed: "y\n", want: safe},
-		"json with a flag": {args: []string{"--json", "setup", "--yes", "--recommended"}, want: both},
+		"json with a flag": {args: []string{"--json", "setup", "--yes", "--recommended"}, terminal: true, typed: "allow\n", want: both},
 	} {
 		t.Run(name, func(t *testing.T) {
 			setupFixture(t)
@@ -100,6 +101,31 @@ func TestSetupAsksTheQuestion(t *testing.T) {
 	}
 	if got := tty.String(); got != "Also let the schedule remove recommended rows? [y/N] " {
 		t.Fatalf("question %q", got)
+	}
+}
+
+func TestSetupYesRecommendedNeedsTerminal(t *testing.T) {
+	setupFixture(t)
+	st, err := OpenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const retry = "run this in your own terminal: sapulidi setup --yes --recommended"
+	code, _, e := runCLI(t, "setup", "--yes", "--recommended")
+	if code != 1 || !strings.Contains(e, retry) {
+		t.Fatalf("no tty: %d %q", code, e)
+	}
+	code, out, _ := runCLI(t, "--json", "setup", "--yes", "--recommended")
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 || doc["error"] != retry {
+		t.Fatalf("json: %d %q %v", code, out, err)
+	}
+	withTerminal(t, true, "y\n")
+	if code, _, e := runCLI(t, "setup", "--yes", "--recommended"); code != 1 || !strings.Contains(e, "not confirmed") {
+		t.Fatalf("mismatch: %d %q", code, e)
+	}
+	if got, err := st.Consent(); err != nil || got != nil {
+		t.Fatalf("a refused setup recorded %v %v", got, err)
 	}
 }
 

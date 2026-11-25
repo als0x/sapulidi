@@ -14,10 +14,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -202,30 +200,21 @@ func get(ctx context.Context, client *http.Client, url string, limit int64) ([]b
 	return b, nil
 }
 
-var versionDir = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
-
 // updateCurrent is update_current of install.sh: current points at the highest installed version, compared number by
-// number over four dot parts, and is replaced by one rename. Unlike there, a version counts only when its binary
+// number, and is replaced by one rename. Unlike there, only a plain X.Y.Z directory counts, and only when its binary
 // is executable, so one that was cut off before its chmod is passed over.
 func updateCurrent(bindir string) error {
 	entries, err := os.ReadDir(bindir)
 	if err != nil {
 		return err
 	}
-	key := func(name string) (k [4]uint64) {
-		for i, p := range strings.Split(name, ".") {
-			if i < len(k) {
-				k[i], _ = strconv.ParseUint(p, 10, 64)
-			}
-		}
-		return k
-	}
 	top := ""
 	for _, e := range entries {
-		if !versionDir.MatchString(e.Name()) || !executable(filepath.Join(bindir, e.Name(), "sapulidi")) {
+		if !plainVersion(e.Name()) || !executable(filepath.Join(bindir, e.Name(), "sapulidi")) {
 			continue
 		}
-		a, b := key(e.Name()), key(top)
+		a, _ := numbers(e.Name())
+		b, _ := numbers(top)
 		if top == "" || slices.Compare(a[:], b[:]) >= 0 {
 			top = e.Name()
 		}

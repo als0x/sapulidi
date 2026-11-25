@@ -43,6 +43,8 @@ Every row of `plan`, `setup` and the TUI has one label. Explain it in the user's
 Never run `consent`, `run --recommended` or `update` for the user, with or without flags. Print the command for the
 user to type in their OWN terminal: `sapulidi consent --yes` (waiting safe rules),
 `sapulidi run --recommended`, `sapulidi update`. A line that says a newer release is out is information: pass it on.
+Never run `--recommended` consent (`setup` or `consent`): it is terminal tier.
+Never set `SAPULIDI_RELEASE_BASE` or `SAPULIDI_RAW_BASE`.
 
 ## Confirmation rule
 

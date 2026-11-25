@@ -128,9 +128,28 @@ func TestConsentYesConfirmsSafeOnly(t *testing.T) {
 	}
 }
 
+func TestConsentYesRecommendedNeedsTerminal(t *testing.T) {
+	st := consentFixture(t, "", []string{})
+	code, _, e := runCLI(t, "consent", "--yes", "--recommended")
+	if code != 1 || !strings.Contains(e, "run this in your own terminal: sapulidi consent --yes --recommended") {
+		t.Fatalf("no tty: %d %q", code, e)
+	}
+	withTerminal(t, true, "no\n")
+	if code, _, _ := runCLI(t, "consent", "--yes", "--recommended"); code != 1 {
+		t.Fatalf("mismatch: %d", code)
+	}
+	if got := consentedKeys(t, st); len(got) != 0 {
+		t.Fatalf("a refused consent recorded %v", got)
+	}
+}
+
 func TestConsentYesRecommended(t *testing.T) {
 	st := consentFixture(t, "", []string{})
+	tty := recordingTTY(t, "allow\n")
 	code, out, e := runCLI(t, "consent", "--yes", "--recommended")
+	if got := tty.String(); !strings.Contains(got, recKey) || strings.Contains(got, safeKey) {
+		t.Fatalf("the question names the recommended rules only: %q", got)
+	}
 	if code != 0 || !strings.Contains(out, "consent recorded for 2 rules") {
 		t.Fatalf("%d %q %q", code, out, e)
 	}
@@ -146,6 +165,7 @@ func TestConsentUpgradeEnabledCategoryWaits(t *testing.T) {
 	if !slices.Equal(waiting, []string{recKey, callKey}) || labels[callKey] != "your-call" {
 		t.Fatalf("%v %v", waiting, labels)
 	}
+	withTerminal(t, true, "allow\n")
 	code, out, _ := runCLI(t, "consent", "--yes", "--recommended")
 	if code != 0 || !strings.Contains(out, "consent recorded for 1 rules") || !strings.Contains(out, callKey+"  your call") {
 		t.Fatalf("a your-call rule is never confirmed here: %d %q", code, out)
@@ -187,8 +207,33 @@ func TestConsentYesYourCallKeyNeedsTerminal(t *testing.T) {
 	}
 }
 
-func TestConsentYesSafeAndRecommendedKeys(t *testing.T) {
+func TestConsentYesSafeKeyNeedsNoTerminal(t *testing.T) {
 	st := consentFixture(t, "", []string{}) // no terminal: today's tier
+	if code, out, e := runCLI(t, "consent", "--yes", safeKey); code != 0 {
+		t.Fatalf("%d %q %q", code, out, e)
+	}
+	if got := consentedKeys(t, st); !slices.Equal(got, []string{safeKey}) {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestConsentYesRecommendedKeyNeedsTerminal(t *testing.T) {
+	st := consentFixture(t, "", []string{})
+	for _, args := range [][]string{{recKey}, {safeKey, recKey}} {
+		code, _, e := runCLI(t, append([]string{"consent", "--yes"}, args...)...)
+		retry := "run this in your own terminal: sapulidi consent --yes " + strings.Join(args, " ")
+		if code != 1 || !strings.Contains(e, retry) {
+			t.Fatalf("no tty %v: %d %q", args, code, e)
+		}
+	}
+	withTerminal(t, true, "no\n")
+	if code, _, _ := runCLI(t, "consent", "--yes", recKey); code != 1 {
+		t.Fatalf("mismatch: %d", code)
+	}
+	if got := consentedKeys(t, st); len(got) != 0 {
+		t.Fatalf("a refused consent recorded %v", got)
+	}
+	withTerminal(t, true, "allow\n")
 	code, out, e := runCLI(t, "consent", "--yes", recKey, safeKey, recKey)
 	if code != 0 || !strings.Contains(out, "consent recorded for 2 rules") {
 		t.Fatalf("%d %q %q", code, out, e)
@@ -221,6 +266,7 @@ func TestConsentJSONListsConfirmed(t *testing.T) {
 		{[]string{"--yes"}, []string{safeKey}},
 		{[]string{"--yes", recKey}, []string{recKey}},
 	} {
+		withTerminal(t, true, "allow\n") // the recommended key asks
 		code, out, e := runCLI(t, append([]string{"consent", "--json"}, tc.args...)...)
 		var doc map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {

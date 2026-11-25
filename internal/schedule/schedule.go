@@ -89,9 +89,12 @@ func Jobs(p config.Paths) []Job {
 	env := func() []EnvVar {
 		return []EnvVar{{"SAPULIDI_CONFIG", p.Config}, {"SAPULIDI_STATE", p.State}, {"SAPULIDI_DATA", p.Data}}
 	}
+	// SAPULIDI_SCHEDULED tells a run that the installed scheduler started it, which the automatic update requires.
+	// The agent job does not carry it: the AI agent it starts would inherit it.
 	return []Job{
 		{Label: LabelRun, Argv: []string{bin, "run", "--trigger", "schedule"}, Interval: config.ScheduleInterval(p),
-			LogPath: filepath.Join(p.State, "schedule-run.log"), Env: env()},
+			LogPath: filepath.Join(p.State, "schedule-run.log"),
+			Env:     append(env(), EnvVar{"SAPULIDI_SCHEDULED", "1"})},
 		{Label: LabelAgent, Argv: []string{bin, "agent", "run", "--trigger", "schedule"}, Interval: agentInterval,
 			LogPath: filepath.Join(p.State, "schedule-agent.log"), Env: env()},
 	}

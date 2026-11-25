@@ -69,7 +69,10 @@ unattended; each is a disk leak, a missing hardening step or an accepted limit.
   names no repository and never checks, and neither does a build whose config file is not valid TOML.
 - `[update] auto = true` (off by default) lets the scheduled run install a newer release, for `install.sh` installs
   only. It asks once a day on its own, so there can then be two requests a day. A plugin install is updated through
-  the host.
+  the host. Only a run started by the installed job updates (the job sets `SAPULIDI_SCHEDULED=1`); a job installed by
+  an earlier version needs `sapulidi schedule install` once.
+- The automatic update honours `HTTPS_PROXY` and `SSL_CERT_FILE` (Linux) from the job's environment, like any Go
+  program.
 - Trust in an update comes from one place: the binary and the `checksums.txt` it is checked against come from the
   same repository (the release assets and the file at the release tag). The checksum catches a damaged or swapped
   download, not a repository or account that someone else controls.
@@ -79,8 +82,8 @@ unattended; each is a disk leak, a missing hardening step or an accepted limit.
 ## Recommended rules
 
 These optional rules carry the label `recommended`. The schedule removes what they find only after
-`sapulidi setup --yes --recommended` or `sapulidi consent --yes --recommended`; `sapulidi run --recommended` removes it
-once, after a question on a terminal.
+`sapulidi setup --yes --recommended` or `sapulidi consent --yes --recommended`, both confirmed on a terminal;
+`sapulidi run --recommended` removes it once, after a question on a terminal.
 
 - Coding agents: `agent/claude-plugin-cache`, `agent/claude-versions`, `code-index/code-index`
 - Build output: `apple/derived-data`, `dart/dart-build`, `elixir/mix-build`, `jvm/gradle-build`, `jvm/maven-target`,

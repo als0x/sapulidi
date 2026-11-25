@@ -47,7 +47,7 @@ func runPlan(app *App, args []string) int {
 		count, size := candidateTotal(group)
 		fmt.Fprintf(out, "%s: %d item(s), %s\n", l.Words(), count, humanBytes(size))
 		for _, c := range group {
-			fmt.Fprintf(out, "  %-17s %10s  %s\n", c.Category, humanBytes(c.Bytes), c.Path)
+			fmt.Fprintf(out, "  %-17s %10s  %s\n", c.Category, humanBytes(c.Bytes), safeText(c.Path))
 			fmt.Fprintf(out, "      %s\n", c.Reason)
 		}
 	}
@@ -62,7 +62,7 @@ func runPlan(app *App, args []string) int {
 		}
 		if *all {
 			for _, k := range sum.Kept {
-				fmt.Fprintf(out, "    kept %-10s %-12s %s\n", k.Why, k.Category, k.Path)
+				fmt.Fprintf(out, "    kept %-10s %-12s %s\n", k.Why, k.Category, safeText(k.Path))
 			}
 		}
 	}
