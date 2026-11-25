@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/als0x/sapulidi/internal/config"
+	"github.com/als0x/sapulidi/internal/update"
 )
 
 // selfEnv is updateEnv with version 0.3.0 installed and one TLS server for the release API and the downloads.
@@ -49,13 +52,50 @@ func newSelfEnv(t *testing.T, routes ...string) *selfEnv {
 			w.WriteHeader(404)
 		}
 	}))
-	oldBase, oldClient := updateAPIBase, updateClient
+	oldBase, oldClient, oldBases := updateAPIBase, updateClient, updateDefaultBases
 	updateAPIBase, updateClient = s.URL, s.Client()
-	t.Cleanup(func() { updateAPIBase, updateClient = oldBase, oldClient; s.Close() })
-	t.Setenv("SAPULIDI_RELEASE_BASE", s.URL+"/rel")
-	t.Setenv("SAPULIDI_RAW_BASE", s.URL+"/raw")
+	updateDefaultBases = func(string, string) update.Bases {
+		return update.Bases{Release: s.URL + "/rel", Raw: s.URL + "/raw"}
+	}
+	t.Cleanup(func() {
+		updateAPIBase, updateClient, updateDefaultBases = oldBase, oldClient, oldBases
+		s.Close()
+	})
+	t.Setenv("SAPULIDI_RELEASE_BASE", "")
+	t.Setenv("SAPULIDI_RAW_BASE", "")
 	withTerminal(t, false, "")
 	return e
+}
+
+// overrideBases points the two override variables at the test server and the default bases at nothing.
+func overrideBases(t *testing.T) (release, raw string) {
+	t.Helper()
+	b := updateDefaultBases("", "")
+	t.Setenv("SAPULIDI_RELEASE_BASE", b.Release)
+	t.Setenv("SAPULIDI_RAW_BASE", b.Raw)
+	updateDefaultBases = func(string, string) update.Bases { // newSelfEnv restores it
+		return update.Bases{Release: "https://127.0.0.1:1/rel", Raw: "https://127.0.0.1:1/raw"}
+	}
+	return b.Release, b.Raw
+}
+
+func TestUpdateHonoursTheBaseOverridesAndPrintsThem(t *testing.T) {
+	e := newSelfEnv(t, "install.sh")
+	release, raw := overrideBases(t)
+	out, errs, code := output(t, "update", "--yes")
+	if code != 0 || e.current(t) != "0.4.0" || !strings.Contains(out, release) || !strings.Contains(out, raw) {
+		t.Fatalf("code %d current %s %q %q", code, e.current(t), out, errs)
+	}
+}
+
+func TestScheduledRunIgnoresTheBaseOverrides(t *testing.T) {
+	e := newAutoEnv(t, true, "install.sh")
+	t.Setenv("SAPULIDI_RELEASE_BASE", "https://127.0.0.1:1/rel")
+	t.Setenv("SAPULIDI_RAW_BASE", "https://127.0.0.1:1/raw")
+	scheduled(t)
+	if e.current(t) != "0.4.0" || e.assets != 2 {
+		t.Fatalf("current %s downloads %d", e.current(t), e.assets)
+	}
 }
 
 func (e *selfEnv) current(t *testing.T) string {
@@ -178,8 +218,28 @@ func TestUpdateJSONIsOneDocument(t *testing.T) {
 	}
 }
 
-// newAutoEnv is selfEnv with a live host, so a scheduled run is not taken for an uninstalled one.
+// newAutoEnv is a set-up install with a live host: newHostEnv plus a recorded consent.
 func newAutoEnv(t *testing.T, auto bool, routes ...string) *selfEnv {
+	t.Helper()
+	e := newHostEnv(t, auto, routes...)
+	p, err := config.ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordConsent(t, p)
+	return e
+}
+
+func TestScheduledRunBeforeSetupDoesNotUpdate(t *testing.T) {
+	e := newHostEnv(t, true, "install.sh")
+	if out := scheduled(t); !strings.Contains(out, "no consent") || e.requests != 0 {
+		t.Fatalf("%d requests %q", e.requests, out)
+	}
+	e.untouched(t)
+}
+
+// newHostEnv is selfEnv with a live host, so a scheduled run is not taken for an uninstalled one.
+func newHostEnv(t *testing.T, auto bool, routes ...string) *selfEnv {
 	t.Helper()
 	e := newSelfEnv(t, routes...)
 	e.config(t, fmt.Sprintf("[update]\nauto = %v\n", auto))

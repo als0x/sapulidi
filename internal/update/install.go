@@ -39,13 +39,35 @@ type Installed struct {
 	Moved   bool
 }
 
-// Install puts the release tag of repo under <dataDir>/bin/<version>/, after verifying its SHA-256 against that
-// tag's checksums.txt, and points <dataDir>/bin/current at the highest installed version. A version that is already
-// there is not downloaded again. SAPULIDI_RELEASE_BASE and SAPULIDI_RAW_BASE replace the two download bases, which
-// must be https.
-func Install(ctx context.Context, client *http.Client, dataDir, repo, tag string) (Installed, error) {
+// Bases are where one release is downloaded from: the directory of its assets and that of its checksums.txt.
+type Bases struct{ Release, Raw string }
+
+// DefaultBases are the URLs of install.sh for the release tag of repo.
+func DefaultBases(repo, tag string) Bases {
+	return Bases{
+		Release: "https://github.com/" + repo + "/releases/download/" + tag,
+		Raw:     "https://raw.githubusercontent.com/" + repo + "/" + tag,
+	}
+}
+
+// FromEnv replaces each base by SAPULIDI_RELEASE_BASE or SAPULIDI_RAW_BASE when that is set, as install.sh does.
+// Only an update a person asked for may use it.
+func (b Bases) FromEnv() Bases {
+	if v := os.Getenv("SAPULIDI_RELEASE_BASE"); v != "" {
+		b.Release = v
+	}
+	if v := os.Getenv("SAPULIDI_RAW_BASE"); v != "" {
+		b.Raw = v
+	}
+	return b
+}
+
+// Install puts the release tag under <dataDir>/bin/<version>/, after verifying its SHA-256 against that tag's
+// checksums.txt, and points <dataDir>/bin/current at the highest installed version. A binary that is already there
+// is kept only when it matches the checksum too. The bases must be https.
+func Install(ctx context.Context, client *http.Client, dataDir, tag string, from Bases) (Installed, error) {
 	version, found := strings.CutPrefix(tag, "v")
-	if _, ok := numbers(version); !found || !ok {
+	if !found || !plainVersion(version) {
 		return Installed{}, fmt.Errorf("update: %q is not a release tag", tag)
 	}
 	if !filepath.IsAbs(dataDir) {
@@ -59,10 +81,18 @@ func Install(ctx context.Context, client *http.Client, dataDir, repo, tag string
 			return Installed{}, fmt.Errorf("update: refusing symlinked directory %s", d)
 		}
 	}
-	if !executable(bin) {
-		body, err := download(ctx, client, repo, tag, "sapulidi_"+version+"_"+runtime.GOOS+"_"+runtime.GOARCH)
+	asset := "sapulidi_" + version + "_" + runtime.GOOS + "_" + runtime.GOARCH
+	want, err := checksum(ctx, client, from, asset)
+	if err != nil {
+		return Installed{}, err
+	}
+	if !executable(bin) || !matches(bin, want) {
+		body, err := get(ctx, client, from.Release+"/"+asset, maxBinary)
 		if err != nil {
 			return Installed{}, err
+		}
+		if sum(body) != want {
+			return Installed{}, fmt.Errorf("update: checksum mismatch for %s", asset)
 		}
 		// One rename puts the file there with mode 0600; until the chmod it does not count as installed, so a run
 		// cut off here downloads it again.
@@ -90,24 +120,33 @@ func executable(path string) bool {
 	return err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0
 }
 
-// download returns the verified bytes of asset.
-func download(ctx context.Context, client *http.Client, repo, tag, asset string) ([]byte, error) {
-	base := os.Getenv("SAPULIDI_RELEASE_BASE")
-	if base == "" {
-		base = "https://github.com/" + repo + "/releases/download/" + tag
-	}
-	raw := os.Getenv("SAPULIDI_RAW_BASE")
-	if raw == "" {
-		raw = "https://raw.githubusercontent.com/" + repo + "/" + tag
-	}
-	for _, b := range []string{base, raw} {
+// plainVersion reports "MAJOR.MINOR.PATCH" with no leading zero, so that one release has one directory name.
+func plainVersion(s string) bool {
+	n, ok := numbers(s)
+	return ok && s == fmt.Sprintf("%d.%d.%d", n[0], n[1], n[2])
+}
+
+func sum(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+// matches reports whether the file at path has the SHA-256 want. A file that cannot be read does not.
+func matches(path, want string) bool {
+	b, err := os.ReadFile(path)
+	return err == nil && sum(b) == want
+}
+
+// checksum is the SHA-256 that checksums.txt gives for asset.
+func checksum(ctx context.Context, client *http.Client, from Bases, asset string) (string, error) {
+	for _, b := range []string{from.Release, from.Raw} {
 		if !strings.HasPrefix(b, "https://") {
-			return nil, fmt.Errorf("update: a download base must be https://: %s", b)
+			return "", fmt.Errorf("update: a download base must be https://: %s", b)
 		}
 	}
-	sums, err := get(ctx, client, raw+"/checksums.txt", maxBody)
+	sums, err := get(ctx, client, from.Raw+"/checksums.txt", maxBody)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	var want []string
 	for _, line := range strings.Split(string(sums), "\n") {
@@ -118,18 +157,11 @@ func download(ctx context.Context, client *http.Client, repo, tag, asset string)
 	slices.Sort(want)
 	switch want = slices.Compact(want); {
 	case len(want) == 0:
-		return nil, fmt.Errorf("update: no checksum line for %s in %s/checksums.txt", asset, raw)
+		return "", fmt.Errorf("update: no checksum line for %s in %s/checksums.txt", asset, from.Raw)
 	case len(want) > 1:
-		return nil, fmt.Errorf("update: conflicting checksum lines for %s in %s/checksums.txt", asset, raw)
+		return "", fmt.Errorf("update: conflicting checksum lines for %s in %s/checksums.txt", asset, from.Raw)
 	}
-	body, err := get(ctx, client, base+"/"+asset, maxBinary)
-	if err != nil {
-		return nil, err
-	}
-	if sum := sha256.Sum256(body); hex.EncodeToString(sum[:]) != want[0] {
-		return nil, fmt.Errorf("update: checksum mismatch for %s", asset)
-	}
-	return body, nil
+	return want[0], nil
 }
 
 // get fetches url, following redirects to https only. Anything but a 200 of at most limit bytes is an error.
@@ -173,7 +205,8 @@ func get(ctx context.Context, client *http.Client, url string, limit int64) ([]b
 var versionDir = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
 
 // updateCurrent is update_current of install.sh: current points at the highest installed version, compared number by
-// number over four dot parts, and is replaced by one rename.
+// number over four dot parts, and is replaced by one rename. Unlike there, a version counts only when its binary
+// is executable, so one that was cut off before its chmod is passed over.
 func updateCurrent(bindir string) error {
 	entries, err := os.ReadDir(bindir)
 	if err != nil {
@@ -189,7 +222,7 @@ func updateCurrent(bindir string) error {
 	}
 	top := ""
 	for _, e := range entries {
-		if !versionDir.MatchString(e.Name()) {
+		if !versionDir.MatchString(e.Name()) || !executable(filepath.Join(bindir, e.Name(), "sapulidi")) {
 			continue
 		}
 		a, b := key(e.Name()), key(top)
@@ -197,7 +230,7 @@ func updateCurrent(bindir string) error {
 			top = e.Name()
 		}
 	}
-	if fi, err := os.Stat(filepath.Join(bindir, top, "sapulidi")); top == "" || err != nil || !fi.Mode().IsRegular() {
+	if top == "" {
 		return nil
 	}
 	link := filepath.Join(bindir, "current")

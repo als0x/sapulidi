@@ -49,13 +49,15 @@ func newRelease(t *testing.T) *release {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(r.server.Close)
-	t.Setenv("SAPULIDI_RELEASE_BASE", r.server.URL+"/rel")
-	t.Setenv("SAPULIDI_RAW_BASE", r.server.URL+"/raw")
 	return r
 }
 
+func (r *release) bases() Bases {
+	return Bases{Release: r.server.URL + "/rel", Raw: r.server.URL + "/raw"}
+}
+
 func (r *release) install(data, tag string) (Installed, error) {
-	return Install(context.Background(), r.server.Client(), data, testRepo, tag)
+	return Install(context.Background(), r.server.Client(), data, tag, r.bases())
 }
 
 // dataDir is a data directory with the given versions installed and current pointing at the last one.
@@ -232,16 +234,80 @@ func TestCurrentOnlyMovesForward(t *testing.T) {
 	}
 }
 
+// setBinary replaces the binary of an installed version.
+func setBinary(t *testing.T, data, version, body string, mode os.FileMode) {
+	t.Helper()
+	path := filepath.Join(data, "bin", version, "sapulidi")
+	if err := os.WriteFile(path, []byte(body), mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInstalledVersionIsNotDownloadedAgain(t *testing.T) {
 	r := newRelease(t)
 	data := dataDir(t, "0.4.0", "0.3.0") // current is behind
+	setBinary(t, data, "0.4.0", newBinary, 0o755)
 	got, err := r.install(data, "v0.4.0")
-	if err != nil || len(r.asked) != 0 || !got.Moved || current(t, data) != "0.4.0" {
+	if err != nil || !reflect.DeepEqual(r.asked, []string{"/raw/checksums.txt"}) || !got.Moved ||
+		current(t, data) != "0.4.0" {
 		t.Fatalf("%+v asked %v %v", got, r.asked, err)
 	}
 	got, err = r.install(data, "v0.4.0")
 	if err != nil || got.Moved || got.Current != "0.4.0" {
 		t.Fatalf("again: %+v %v", got, err)
+	}
+}
+
+func TestInstalledBinaryThatDoesNotMatchIsReplaced(t *testing.T) {
+	r := newRelease(t)
+	data := dataDir(t, "0.4.0", "0.3.0")
+	got, err := r.install(data, "v0.4.0") // 0.4.0 holds something else
+	if err != nil || !got.Moved {
+		t.Fatalf("%+v %v", got, err)
+	}
+	b, err := os.ReadFile(filepath.Join(data, "bin", "0.4.0", "sapulidi"))
+	if err != nil || string(b) != newBinary {
+		t.Fatalf("binary holds %q %v", b, err)
+	}
+}
+
+func TestInstalledBinaryIsNotTrustedWithoutAMatch(t *testing.T) {
+	for name, set := range map[string]func(*release){
+		"no checksums":  func(r *release) { r.sumsStatus = 404 },
+		"no download":   func(r *release) { r.assetStatus = 404 },
+		"bad download":  func(r *release) { r.binary = "tampered" },
+		"no sums match": func(r *release) { r.sums = sumLine(newBinary, "other") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRelease(t)
+			set(r)
+			data := dataDir(t, "0.4.0", "0.3.0")
+			before := tree(t, data)
+			if _, err := r.install(data, "v0.4.0"); err == nil {
+				t.Fatal("accepted")
+			}
+			if after := tree(t, data); !reflect.DeepEqual(before, after) {
+				t.Fatalf("changed:\n%v\n%v", before, after)
+			}
+		})
+	}
+}
+
+func TestCurrentSkipsABinaryThatIsNotExecutable(t *testing.T) {
+	r := newRelease(t)
+	data := dataDir(t, "0.9.0", "0.3.0")
+	setBinary(t, data, "0.9.0", "cut off", 0o600)
+	r.binary = "tampered"
+	if _, err := r.install(data, "v0.4.0"); err == nil || current(t, data) != "0.3.0" {
+		t.Fatalf("failed install: current %s %v", current(t, data), err)
+	}
+	r.binary = newBinary
+	got, err := r.install(data, "v0.4.0")
+	if err != nil || !got.Moved || current(t, data) != "0.4.0" {
+		t.Fatalf("%+v current %s %v", got, current(t, data), err)
 	}
 }
 
@@ -257,10 +323,11 @@ func (r *recorder) RoundTrip(q *http.Request) (*http.Response, error) {
 }
 
 func TestInstallAsksTheURLsOfInstallSh(t *testing.T) {
-	t.Setenv("SAPULIDI_RELEASE_BASE", "")
-	t.Setenv("SAPULIDI_RAW_BASE", "")
+	t.Setenv("SAPULIDI_RELEASE_BASE", "https://ignored.invalid") // the default bases read no variable
 	r := &recorder{}
-	if _, err := Install(context.Background(), &http.Client{Transport: r}, dataDir(t), testRepo, "v0.4.0"); err != nil {
+	_, err := Install(context.Background(), &http.Client{Transport: r}, dataDir(t), "v0.4.0",
+		DefaultBases(testRepo, "v0.4.0"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -276,8 +343,10 @@ func TestInstallRefusesPlainHTTP(t *testing.T) {
 	plain := serve(t, reply(200, newBinary))
 	t.Run("base", func(t *testing.T) {
 		r := newRelease(t)
-		t.Setenv("SAPULIDI_RELEASE_BASE", plain.URL)
-		if _, err := r.install(dataDir(t), "v0.4.0"); err == nil || !strings.Contains(err.Error(), "https") {
+		from := r.bases()
+		from.Release = plain.URL
+		_, err := Install(context.Background(), r.server.Client(), dataDir(t), "v0.4.0", from)
+		if err == nil || !strings.Contains(err.Error(), "https") {
 			t.Fatalf("error %v", err)
 		}
 		if len(r.asked) != 0 {
@@ -288,16 +357,33 @@ func TestInstallRefusesPlainHTTP(t *testing.T) {
 		r := newRelease(t)
 		hop := httptest.NewTLSServer(http.RedirectHandler(plain.URL, http.StatusFound))
 		t.Cleanup(hop.Close)
-		t.Setenv("SAPULIDI_RELEASE_BASE", hop.URL)
-		if _, err := r.install(dataDir(t), "v0.4.0"); err == nil || !strings.Contains(err.Error(), "https") {
+		from := r.bases()
+		from.Release = hop.URL
+		_, err := Install(context.Background(), r.server.Client(), dataDir(t), "v0.4.0", from)
+		if err == nil || !strings.Contains(err.Error(), "https") {
 			t.Fatalf("error %v", err)
 		}
 	})
 }
 
+func TestBasesFromEnv(t *testing.T) {
+	def := DefaultBases(testRepo, "v0.4.0")
+	t.Setenv("SAPULIDI_RELEASE_BASE", "")
+	t.Setenv("SAPULIDI_RAW_BASE", "")
+	if got := def.FromEnv(); got != def {
+		t.Fatalf("empty variables: %+v", got)
+	}
+	t.Setenv("SAPULIDI_RELEASE_BASE", "https://r.invalid")
+	t.Setenv("SAPULIDI_RAW_BASE", "https://s.invalid")
+	if got := def.FromEnv(); got != (Bases{Release: "https://r.invalid", Raw: "https://s.invalid"}) {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestInstallRefusesATagThatIsNotARelease(t *testing.T) {
 	r := newRelease(t)
-	for _, tag := range []string{"", "0.4.0", "v0.4", "v0.4.0-rc1", "v../../x"} {
+	for _, tag := range []string{"", "0.4.0", "v0.4", "v0.4.0-rc1", "v../../x",
+		"v00.4.0", "v0.04.0", "v0.4.00"} {
 		if _, err := r.install(dataDir(t), tag); err == nil {
 			t.Errorf("%q accepted", tag)
 		}

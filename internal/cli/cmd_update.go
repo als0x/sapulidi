@@ -19,10 +19,12 @@ import (
 	"github.com/als0x/sapulidi/internal/version"
 )
 
-// updateAPIBase is the release API and updateClient the client for it and the downloads; tests replace them.
+// updateAPIBase is the release API, updateClient the client for it and the downloads, and updateDefaultBases says
+// where a release is downloaded from; tests replace them.
 var (
-	updateAPIBase = update.APIBase
-	updateClient  = &http.Client{}
+	updateAPIBase      = update.APIBase
+	updateClient       = &http.Client{}
+	updateDefaultBases = update.DefaultBases
 )
 
 // updateTimeout bounds the request to the release API.
@@ -103,10 +105,11 @@ func selfUpdate(app *App, yes bool) int {
 	if err != nil {
 		return fail(app, "update", err)
 	}
+	var from update.Bases // set when something is to be downloaded
 	report := func(res update.Installed, notice, text string) int {
 		if app.JSON {
 			writeJSON(app.Stdout, map[string]any{"updated": res.Moved, "running": version.Version, "latest": tag,
-				"current": res.Current, "notice": notice})
+				"current": res.Current, "notice": notice, "release_base": from.Release, "raw_base": from.Raw})
 		} else {
 			fmt.Fprintln(app.Stdout, text)
 		}
@@ -121,8 +124,10 @@ func selfUpdate(app *App, yes bool) int {
 		return report(update.Installed{}, notice, notice)
 	}
 	change := version.Version + " → " + safeText(tag)
+	from = updateDefaultBases(version.Repo, tag).FromEnv()
 	if !app.JSON {
 		fmt.Fprintln(app.Stdout, change)
+		fmt.Fprintf(app.Stdout, "download from %s (checksums from %s)\n", safeText(from.Release), safeText(from.Raw))
 	}
 	if !yes {
 		err := confirm.Terminal("Update Sapu Lidi "+change+"? [y/N] ", "y")
@@ -133,7 +138,7 @@ func selfUpdate(app *App, yes bool) int {
 			return fail(app, "update", err)
 		}
 	}
-	res, err := update.Install(context.Background(), updateClient, paths.Data, version.Repo, tag)
+	res, err := update.Install(context.Background(), updateClient, paths.Data, tag, from)
 	if err != nil {
 		logUpdate(paths, "update-failed", map[string]any{"tag": tag, "error": err.Error()})
 		return fail(app, "update", err)
@@ -154,8 +159,8 @@ func logUpdate(paths config.Paths, kind string, fields map[string]any) {
 }
 
 // autoUpdate is the opt-in update after a scheduled run: update.auto, an install.sh install, once a day, never with
-// a person at a terminal. It prints nothing; a failure is logged and tried again the next day. check says once
-// that an update happened.
+// a person at a terminal. It downloads from the default bases only, whatever the environment says. It prints
+// nothing; a failure is logged and tried again the next day. check says once that an update happened.
 func autoUpdate() {
 	if version.Repo == "" || confirm.StdioIsTerminal() {
 		return
@@ -196,7 +201,7 @@ func autoUpdate() {
 	if off != "" || !update.Newer(tag, version.Version) {
 		return
 	}
-	res, err := update.Install(context.Background(), updateClient, paths.Data, version.Repo, tag)
+	res, err := update.Install(context.Background(), updateClient, paths.Data, tag, updateDefaultBases(version.Repo, tag))
 	if err != nil {
 		failed(err)
 		return
