@@ -43,6 +43,7 @@ func openStore(t *testing.T) *state.Store {
 func pruneFixture(t *testing.T) (*fixture, *category) {
 	t.Helper()
 	f := newFixture(t)
+	f.set.ConsentedKeys = map[string]bool{"caches/uv-prune@1": true} // CG1: an optional rule runs only with consent
 	f.tool(t, "uv", []string{"uv", "cache", "dir"}, f.dir("uv"), 10)
 	return f, &category{name: "mcp-runtime"}
 }

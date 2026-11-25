@@ -572,18 +572,6 @@ func TestWorktreeOpenKept(t *testing.T) {
 	}
 }
 
-func TestOptionalRunsWithoutRuleConsent(t *testing.T) {
-	f := newFix(t)
-	f.set.ConsentAll = false
-	p := f.mk("a")
-	c := f.cand(p)
-	c.Category, c.RuleKey = "deps", "x/deps@1"
-	s := f.do(Options{}, f.cat("deps", core.Optional, c))
-	if exists(p) || !hasPath(s.Removed, p) {
-		t.Fatalf("%+v", s)
-	}
-}
-
 func TestOptionalDisabledNotScanned(t *testing.T) {
 	f := newFix(t)
 	cat := f.cat("deps", core.Optional)

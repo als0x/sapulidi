@@ -38,6 +38,9 @@ type Options struct {
 	// Entries that are empty, relative or not filepath.Clean'ed select nothing and are kept as not-a-candidate.
 	// It cannot be combined with Paths.
 	Explicit []string `json:"-" toml:"-"`
+	// IncludeRecommended waives consent, for this run, for candidates whose rule has Recommend set, and waives
+	// nothing else. In-process only: nothing outside engine and `run` may set it.
+	IncludeRecommended bool `json:"-" toml:"-"`
 }
 
 // Summary is the outcome of Plan or Run.
@@ -48,7 +51,7 @@ type Summary struct {
 	FreeBefore, FreeAfter uint64
 	Mode                  string // "run" | "dry-run" | "no-consent" | "paused" | "busy" | "uninstalled"
 	Stopped               bool
-	Waiting               []string // rule keys waiting for consent
+	Waiting               []string // safe and recommended rule keys waiting for consent
 }
 
 // Hooks: each is set once in the owner's init(); a second call panics; unset means skip.
@@ -118,6 +121,7 @@ type runner struct {
 	sink        *factSink
 	dry         bool // every candidate is a dry run
 	gate        bool // consent gating applies (false before setup: everything is dry anyway)
+	recorded    bool // a consent record exists; without one only IncludeRecommended allows a removal
 	waiting     map[string]bool
 	logged      bool
 
@@ -271,8 +275,28 @@ func (r *runner) sourceOf(cat core.Category, rule core.Rule) string {
 	return "optional-on"
 }
 
-// handle decides what happens to one candidate. lowDisk candidates skip the Paths filter and consent gating
-// (the low-disk tier is the consent); every guard still runs.
+// labelOf is the label of a candidate of this rule.
+func labelOf(rule core.Rule) core.Label {
+	switch {
+	case rule.Bucket == core.Auto:
+		return core.LabelSafe
+	case rule.Recommend:
+		return core.LabelRecommended
+	}
+	return core.LabelYourCall
+}
+
+// consented says whether this run may remove a candidate of the rule without the user picking it: the rule key is in
+// the consent record, or the run includes recommended rows and this is one. Without a record nothing is consented.
+func (r *runner) consented(rule core.Rule) bool {
+	if r.opt.IncludeRecommended && rule.Recommend {
+		return true
+	}
+	return r.recorded && r.env.Settings.Consented(rule.Key())
+}
+
+// handle decides what happens to one candidate. lowDisk candidates skip the Paths filter; consent and every guard
+// still apply to them.
 func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 	if !r.env.Settings.RuleEnabled(c.RuleKey) {
 		return
@@ -300,6 +324,7 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 		return
 	}
 	c.Bytes = -1
+	c.Label = labelOf(rule)
 	if err := r.guards(cat, c, rule); err != nil {
 		r.sum.Kept = append(r.sum.Kept, keptOf(c, err))
 		return
@@ -317,8 +342,10 @@ func (r *runner) handle(cat core.Category, c core.Candidate, lowDisk bool) {
 		return
 	}
 	dry := r.dry
-	if r.gate && !r.explicit && (cat.Bucket() == core.Auto || rule.Bucket == core.Auto) && !r.env.Settings.Consented(c.RuleKey) {
-		r.waiting[c.RuleKey] = true
+	if r.gate && !r.explicit && !r.consented(rule) {
+		if c.Label != core.LabelYourCall { // waiting is what setup and consent --yes can confirm
+			r.waiting[c.RuleKey] = true
+		}
 		dry = true
 	}
 	if dry {
@@ -492,7 +519,7 @@ func Plan(env *core.Env, cats []core.Category, opt Options) Summary {
 	defer cancel()
 	s := Summary{Mode: "dry-run"}
 	r := newRunner(env, opt, ctx, &s)
-	r.dry, r.gate = true, true
+	r.dry, r.gate, r.recorded = true, true, true
 	r.showOff = opt.ShowOptionalOff
 	s.FreeBefore = r.freeBytes()
 	r.scan(cats)
@@ -554,12 +581,13 @@ func Run(env *core.Env, cats []core.Category, st *state.Store, opt Options) (Sum
 	switch {
 	case forced != "":
 		s.Mode, r.dry = forced, true
-	case consent == nil && !r.explicit:
+	case consent == nil && !r.explicit && !opt.IncludeRecommended:
 		s.Mode, r.dry = "no-consent", true
 	case opt.DryRun:
 		s.Mode, r.dry = "dry-run", true
 	}
-	r.gate = consent != nil
+	r.recorded = consent != nil
+	r.gate = r.recorded || opt.IncludeRecommended
 
 	s.FreeBefore = r.freeBytes()
 	if !r.dry {

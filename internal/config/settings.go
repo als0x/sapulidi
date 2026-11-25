@@ -65,10 +65,10 @@ func (s *settings) CategoryEnabled(category string) bool {
 		return false
 	}
 	en := s.c.Categories[category].Enabled
-	if known && b == core.Auto {
-		return en == nil || *en
+	if known {
+		return en == nil || *en // auto and optional: on unless switched off
 	}
-	return en != nil && *en // optional, and any category the caller did not declare
+	return en != nil && *en // a category nobody declared
 }
 
 func (s *settings) RuleEnabled(ruleKey string) bool {
