@@ -383,7 +383,7 @@ func TestBasesFromEnv(t *testing.T) {
 func TestInstallRefusesATagThatIsNotARelease(t *testing.T) {
 	r := newRelease(t)
 	for _, tag := range []string{"", "0.4.0", "v0.4", "v0.4.0-rc1", "v../../x",
-		"v00.4.0", "v0.04.0", "v0.4.00"} {
+		"v00.4.0", "v0.04.0", "v0.4.00", "v01.2.3", "v1.02.3", "v1.2.03"} {
 		if _, err := r.install(dataDir(t), tag); err == nil {
 			t.Errorf("%q accepted", tag)
 		}

@@ -281,6 +281,23 @@ func TestScheduledRunUpdatesOnceADay(t *testing.T) {
 	}
 }
 
+// The one request is the question for the latest tag; nothing is asked of the download bases.
+func TestScheduledRunRefusesALeadingZeroTagBeforeAnyDownload(t *testing.T) {
+	for _, tag := range []string{"v01.2.3", "v1.02.3", "v1.2.03"} {
+		t.Run(tag, func(t *testing.T) {
+			e := newAutoEnv(t, true, "install.sh")
+			e.tag = tag
+			scheduled(t)
+			if e.requests != 1 {
+				t.Fatalf("%d requests", e.requests)
+			}
+			e.untouched(t)
+			e.wantLog(t, "update-auto-failed")
+			e.wantLog(t, "is not a release tag")
+		})
+	}
+}
+
 func TestScheduledRunRetriesTheNextDayAndStaysSilent(t *testing.T) {
 	e := newAutoEnv(t, true, "install.sh")
 	e.binary = "tampered"
