@@ -24,18 +24,37 @@ func personal(home, p string, fold func(string) string) bool {
 	return false
 }
 
-// holdsGit reports whether dir, or an ancestor up to home, has a `.git` entry of any kind. Git rejecting
-// such a directory means a repository it cannot read, not a plain folder.
+// holdsGit reports whether dir, or an ancestor up to home, has a `.git` that may be a repository's. Git
+// rejecting such a directory means a repository it cannot read, not a plain folder.
 func holdsGit(home, dir string, fold func(string) string) bool {
 	stop := fold(realPath(home))
 	for p := realPath(dir); ; p = filepath.Dir(p) {
-		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+		if gitMayBeRepo(filepath.Join(p, ".git")) {
 			return true
 		}
 		if fold(p) == stop || p == filepath.Dir(p) {
 			return false
 		}
 	}
+}
+
+// gitMayBeRepo reports whether the `.git` entry at path blocks an expansion: anything but a directory does
+// (a gitfile, a symlink), and so does a directory with any of HEAD, objects or refs, or one that cannot be
+// looked into. A directory with none of them, such as one holding only info/exclude, is not a repository.
+func gitMayBeRepo(path string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	if !fi.IsDir() {
+		return true
+	}
+	for _, name := range []string{"HEAD", "objects", "refs"} {
+		if _, err := os.Lstat(filepath.Join(path, name)); !errors.Is(err, fs.ErrNotExist) {
+			return true
+		}
+	}
+	return false
 }
 
 // expand returns the repositories inside the history folder c, which is not one itself, as candidates

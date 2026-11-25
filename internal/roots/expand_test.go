@@ -225,9 +225,11 @@ func TestExpandLimitsGitRunsOnFakeRepositories(t *testing.T) {
 
 func TestExpandRefusesFolderWithOwnGit(t *testing.T) {
 	for name, plant := range map[string]func(dotgit string) error{
-		"directory": func(p string) error { return os.Mkdir(p, 0o755) },
-		"file":      func(p string) error { return os.WriteFile(p, []byte("garbage\n"), 0o644) },
-		"symlink":   func(p string) error { return os.Symlink("gone", p) },
+		"HEAD only":    func(p string) error { return writeFile(filepath.Join(p, "HEAD"), "garbage\n") },
+		"objects only": func(p string) error { return os.MkdirAll(filepath.Join(p, "objects"), 0o755) },
+		"refs only":    func(p string) error { return os.MkdirAll(filepath.Join(p, "refs"), 0o755) },
+		"gitfile":      func(p string) error { return writeFile(p, "garbage\n") },
+		"symlink":      func(p string) error { return os.Symlink("gone", p) },
 	} {
 		for _, at := range []string{"code/work/sub", "code/work", "code", "."} {
 			t.Run(name+" at "+at, func(t *testing.T) {
@@ -244,6 +246,33 @@ func TestExpandRefusesFolderWithOwnGit(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func writeFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// A `.git` directory without HEAD, objects and refs, such as one holding only info/exclude, is not a
+// repository: neither the folder nor an ancestor holding one blocks the expansion.
+func TestExpandIgnoresDotGitThatIsNoRepository(t *testing.T) {
+	for _, at := range []string{"code/work", "code", "."} {
+		t.Run(at, func(t *testing.T) {
+			f := newFixture(t)
+			r := f.emptyRepo(t, "code/work/r")
+			work := filepath.Dir(r)
+			if err := writeFile(filepath.Join(f.home, at, ".git", "info", "exclude"), "r/\n"); err != nil {
+				t.Fatal(err)
+			}
+			transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(work))
+			rs, ks := f.discover()
+			if !slices.Equal(paths(rs), []string{r}) || mentions(ks, work) {
+				t.Fatalf("roots = %v kept = %v", rs, ks)
+			}
+		})
 	}
 }
 
