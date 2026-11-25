@@ -20,16 +20,16 @@ const (
 
 func init() { SetBeforeRun(heartbeatHook) }
 
-// heartbeatHook is the BeforeRun hook. A scheduled run that finds no heartbeat newer than 30 days is forced to
-// Mode "uninstalled" (everything dry run) and tells the user once. Otherwise, on a real run, it removes old
-// unused binary versions at most once a day.
+// heartbeatHook is the BeforeRun hook. A scheduled run that finds no heartbeat newer than 30 days — and no
+// standalone install.sh marker — is forced to Mode "uninstalled" (everything dry run) and tells the user once.
+// Otherwise, on a real run, it removes old unused binary versions at most once a day.
 func heartbeatHook(env *core.Env, st *state.Store, opt Options) string {
 	now := env.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
 	beats := st.Heartbeats()
-	if opt.Trigger == "schedule" && !anyFresh(beats, now) {
+	if opt.Trigger == "schedule" && !anyFresh(beats, now) && !st.InstalledBy("install.sh") {
 		if env.Facts != nil {
 			env.Facts.Fact("uninstalled", uninstalledText)
 		}

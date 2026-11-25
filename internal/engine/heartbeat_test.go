@@ -136,3 +136,109 @@ func TestHookGCsOldBinariesOncePerDay(t *testing.T) {
 		t.Fatalf("got %q, bin exists %v", got, exists(bin))
 	}
 }
+
+func (f *fix) writeInstallMarker(route string) {
+	f.t.Helper()
+	dir := filepath.Join(f.home, ".local", "state", "sapulidi", "installed-by")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, route), nil, 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func TestStandaloneInstallSkipsHeartbeatCheck(t *testing.T) {
+	f := newFix(t)
+	f.writeInstallMarker("install.sh")
+	facts := factRec{}
+	f.env.Facts = facts
+	if got := heartbeatHook(f.env, f.st, Options{Trigger: "schedule"}); got != "" {
+		t.Fatalf("got %q, want empty for standalone install.sh", got)
+	}
+	if len(facts) != 0 {
+		t.Fatalf("unexpected facts: %v", facts)
+	}
+	SetBeforeRun(heartbeatHook)
+	p := f.mk("a")
+	s := f.do(Options{Trigger: "schedule"}, f.cat("temp", core.Auto, f.cand(p)))
+	if s.Mode != "run" || exists(p) {
+		t.Fatalf("standalone scheduled run did not run normally: %+v", s)
+	}
+}
+
+func TestStandalonePluginOnlyStillUninstalled(t *testing.T) {
+	f := newFix(t)
+	f.writeInstallMarker("plugin")
+	f.setHeartbeat("claude-code", 31*24*time.Hour)
+	facts := factRec{}
+	f.env.Facts = facts
+	if got := heartbeatHook(f.env, f.st, Options{Trigger: "schedule"}); got != "uninstalled" {
+		t.Fatalf("got %q, want uninstalled for plugin-only install with stale heartbeat", got)
+	}
+	if facts["uninstalled"] != uninstalledText {
+		t.Fatalf("facts %v", facts)
+	}
+}
+
+func TestStandaloneSymlinkMarkerRejected(t *testing.T) {
+	t.Run("symlink file", func(t *testing.T) {
+		f := newFix(t)
+		target := filepath.Join(f.tmp, "marker")
+		if err := os.MkdirAll(f.tmp, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(f.home, ".local", "state", "sapulidi", "installed-by")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, "install.sh")); err != nil {
+			t.Fatal(err)
+		}
+		facts := factRec{}
+		f.env.Facts = facts
+		if got := heartbeatHook(f.env, f.st, Options{Trigger: "schedule"}); got != "uninstalled" {
+			t.Fatalf("symlink marker bypassed check: got %q", got)
+		}
+		if facts["uninstalled"] != uninstalledText {
+			t.Fatalf("facts %v", facts)
+		}
+	})
+
+	t.Run("symlink dir", func(t *testing.T) {
+		f := newFix(t)
+		realDir := filepath.Join(f.tmp, "real-installed-by")
+		if err := os.MkdirAll(realDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(realDir, "install.sh"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		linkDir := filepath.Join(f.home, ".local", "state", "sapulidi", "installed-by")
+		if err := os.Symlink(realDir, linkDir); err != nil {
+			t.Fatal(err)
+		}
+		facts := factRec{}
+		f.env.Facts = facts
+		if got := heartbeatHook(f.env, f.st, Options{Trigger: "schedule"}); got != "uninstalled" {
+			t.Fatalf("symlink installed-by dir bypassed check: got %q", got)
+		}
+		if facts["uninstalled"] != uninstalledText {
+			t.Fatalf("facts %v", facts)
+		}
+	})
+
+	t.Run("directory marker", func(t *testing.T) {
+		f := newFix(t)
+		dir := filepath.Join(f.home, ".local", "state", "sapulidi", "installed-by", "install.sh")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if got := heartbeatHook(f.env, f.st, Options{Trigger: "schedule"}); got != "uninstalled" {
+			t.Fatalf("directory marker bypassed check: got %q", got)
+		}
+	})
+}
