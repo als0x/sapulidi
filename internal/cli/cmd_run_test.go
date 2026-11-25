@@ -14,6 +14,7 @@ import (
 	"github.com/als0x/sapulidi/internal/config"
 	"github.com/als0x/sapulidi/internal/confirm"
 	"github.com/als0x/sapulidi/internal/core"
+	"github.com/als0x/sapulidi/internal/engine"
 	"github.com/als0x/sapulidi/internal/testutil"
 )
 
@@ -145,6 +146,74 @@ func TestRunRecommendedWithNothingToRemove(t *testing.T) {
 	}
 	if !present(safe) || !present(call) {
 		t.Fatal("an empty selection removed something")
+	}
+}
+
+// A path-less recommended row cannot be named in Options.Paths, so the question must not count it.
+func TestRunRecommendedPromisesOnlyRowsWithAPath(t *testing.T) {
+	safe, rec, call := runFixture(t)
+	env, _ := BuildEnv()
+	tmp := env.TempDir
+	rows := []core.Candidate{{Category: "deps", RuleKey: recKey, Path: rec, Base: tmp, Removal: core.RenameDelete}}
+	for _, name := range []string{"rec2", "rec3"} {
+		p := filepath.Join(tmp, name)
+		writeFile(t, filepath.Join(p, "data.bin"), "data")
+		testutil.Touch(t, filepath.Join(p, "data.bin"), 48*time.Hour)
+		testutil.Touch(t, p, 48*time.Hour)
+		rows = append(rows, core.Candidate{Category: "deps", RuleKey: recKey, Path: p, Base: tmp, Removal: core.RenameDelete})
+	}
+	categories = func() []core.Category {
+		return []core.Category{stubCat{name: "deps", bucket: core.Optional, cands: rows}}
+	}
+	oldPlan := planFn
+	planFn = func(env *core.Env, cats []core.Category, opt engine.Options) engine.Summary {
+		s := oldPlan(env, cats, opt)
+		s.WouldRemove = append(s.WouldRemove, core.Candidate{Category: "deps", RuleKey: recKey, Bytes: 1 << 30,
+			Label: core.LabelRecommended})
+		return s
+	}
+	t.Cleanup(func() { planFn = oldPlan })
+	tty := recordingTTY(t, "y\n")
+	code, out, e := runCLI(t, "run", "--recommended")
+	if code != 0 || !strings.Contains(out, "removed 3 ") {
+		t.Fatalf("%d %q %q", code, out, e)
+	}
+	if q := tty.String(); !strings.Contains(q, "recommended: 3 item(s), ") || strings.Contains(q, "GiB") {
+		t.Fatalf("question %q", q)
+	}
+	for _, r := range rows {
+		if present(r.Path) {
+			t.Errorf("%s was shown but not removed", r.Path)
+		}
+	}
+	if !present(safe) || !present(call) {
+		t.Fatal("a row that was not shown was removed")
+	}
+}
+
+func TestRunRecommendedDryRunAsksNothingAndRemovesNothing(t *testing.T) {
+	safe, rec, call := runFixture(t)
+	tty := recordingTTY(t, "y\n")
+	code, out, e := runCLI(t, "run", "--recommended", "--dry-run")
+	if code != 0 || !strings.Contains(out, "recommended: 1 item(s), ") || !strings.Contains(out, rec) ||
+		!strings.Contains(out, "dry run, 1 would be removed") || strings.Contains(out, "[y/N]") {
+		t.Fatalf("%d %q %q", code, out, e)
+	}
+	code, out, e = runCLI(t, "--json", "run", "--recommended", "--dry-run")
+	var doc struct {
+		Mode        string `json:"mode"`
+		Removed     int    `json:"removed"`
+		WouldRemove int    `json:"would_remove"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 || doc.Mode != "dry-run" ||
+		doc.Removed != 0 || doc.WouldRemove != 1 {
+		t.Fatalf("%d %q %q %v", code, out, e, err)
+	}
+	if tty.Len() != 0 {
+		t.Fatalf("a dry run asked %q", tty.String())
+	}
+	if !present(safe) || !present(rec) || !present(call) {
+		t.Fatal("a dry run removed something")
 	}
 }
 

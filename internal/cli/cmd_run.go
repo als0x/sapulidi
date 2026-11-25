@@ -58,14 +58,23 @@ func runRun(app *App, args []string) int {
 	}
 	opt := engine.Options{DryRun: *dry, Quick: *quick, Budget: b, Trigger: *trigger}
 	if *recommended {
-		rows := withLabel(planFn(env, categories(), opt).WouldRemove, core.LabelRecommended)
-		// A path-less row cannot be named in Paths; an empty Paths would mean every row.
-		for _, c := range rows {
+		plan := planFn(env, categories(), opt)
+		// A path-less row cannot be named in Paths, so it is neither shown nor counted.
+		var rows []core.Candidate
+		for _, c := range withLabel(plan.WouldRemove, core.LabelRecommended) {
 			if c.Path != "" {
+				rows = append(rows, c)
 				opt.Paths = append(opt.Paths, c.Path)
 			}
 		}
-		if len(opt.Paths) == 0 {
+		if *dry {
+			if !app.JSON && len(rows) > 0 {
+				fmt.Fprint(app.Stdout, recommendedList(rows, len(rows)))
+			}
+			return printRun(app, engine.Summary{Mode: "dry-run", WouldRemove: rows, Kept: plan.Kept})
+		}
+		// An empty Paths would mean every row.
+		if len(rows) == 0 {
 			if !app.JSON {
 				for _, f := range invalidConfigFiles() {
 					fmt.Fprintln(app.Stdout, invalidConfigMessage(f))
@@ -105,19 +114,23 @@ func refuseNoTerminal(app *App) int {
 // promptRows is how many recommended rows the question lists.
 const promptRows = 10
 
-// recommendedPrompt lists the recommended rows and asks whether to remove them.
+// recommendedPrompt lists the first recommended rows and asks whether to remove them.
 func recommendedPrompt(rows []core.Candidate) string {
+	return recommendedList(rows, promptRows) + "Remove them now? [y/N] "
+}
+
+// recommendedList is the count and size of the recommended rows and at most limit of them.
+func recommendedList(rows []core.Candidate, limit int) string {
 	var s strings.Builder
 	n, size := candidateTotal(rows)
 	fmt.Fprintf(&s, "%s: %d item(s), %s\n", core.LabelRecommended.Words(), n, humanBytes(size))
 	for i, c := range rows {
-		if i == promptRows {
+		if i == limit {
 			fmt.Fprintf(&s, "  and %d more (sapulidi plan lists them all)\n", len(rows)-i)
 			break
 		}
 		fmt.Fprintf(&s, "  %-17s %10s  %s\n", c.Category, humanBytes(c.Bytes), safeText(c.Path))
 	}
-	s.WriteString("Remove them now? [y/N] ")
 	return s.String()
 }
 
