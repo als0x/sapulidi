@@ -31,6 +31,9 @@ type Rule struct {
 	Strategy string   // KindVersions: a strategy id known to internal/tools
 	Location string   // KindVersions, KindPath: a location id known to the category
 	OS       []string // "darwin", "linux"; empty means both
+	// Recommend says sapulidi stands behind removing this once the rule's guards and MinAge pass.
+	// Only valid on Optional rules.
+	Recommend bool
 }
 
 func (r Rule) Key() string { return r.Pack + "/" + r.ID + "@" + strconv.Itoa(r.Rev) }

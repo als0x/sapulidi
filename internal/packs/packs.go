@@ -41,6 +41,8 @@ type rawRule struct {
 	Strategy string   `toml:"strategy"`
 	Location string   `toml:"location"`
 	OS       []string `toml:"os"`
+	// Recommend is a pointer because the key itself, whatever its value, is refused outside optional rules.
+	Recommend *bool `toml:"recommend"`
 }
 
 // Load returns the rules of every valid pack in builtin (the *.toml files at its root) and in userDir
@@ -74,7 +76,7 @@ func load(builtin fs.FS, userDir, goos string) ([]core.Rule, []error) {
 				errs = append(errs, fmt.Errorf("pack %s: %v", name, err))
 				continue
 			}
-			rs, perrs := parsePack(name, data)
+			rs, perrs := parsePack(name, data, true)
 			errs = append(errs, perrs...)
 			rules = append(rules, rs...)
 		}
@@ -106,7 +108,7 @@ func load(builtin fs.FS, userDir, goos string) ([]core.Rule, []error) {
 				errs = append(errs, &Error{Pack: name, Msg: err.Error()})
 				continue
 			}
-			rs, perrs := parsePack(name, data)
+			rs, perrs := parsePack(name, data, false)
 			errs = append(errs, perrs...)
 			for i := range rs {
 				rs[i].Pack = "user-" + name
@@ -175,8 +177,9 @@ func readUserFile(p string) ([]byte, error) {
 	return data, nil
 }
 
-// parsePack decodes and validates one pack. Any error drops the whole pack.
-func parsePack(name string, data []byte) ([]core.Rule, []error) {
+// parsePack decodes and validates one pack. Any error drops the whole pack. Only a built-in pack may use the
+// recommend key.
+func parsePack(name string, data []byte, builtin bool) ([]core.Rule, []error) {
 	var raw rawPack
 	md, err := toml.Decode(string(data), &raw)
 	if err != nil {
@@ -198,10 +201,15 @@ func parsePack(name string, data []byte) ([]core.Rule, []error) {
 			continue
 		}
 		seen[rr.ID] = true
+		if rr.Recommend != nil && !builtin {
+			errs = append(errs, &Error{Pack: name, Rule: rr.ID, Field: "recommend", Msg: "only built-in packs can recommend"})
+			continue
+		}
 		r := core.Rule{
 			Pack: name, ID: rr.ID, Rev: rr.Rev, Category: rr.Category, Bucket: core.Bucket(rr.Bucket),
 			Kind: core.RuleKind(rr.Kind), Names: rr.Names, Markers: rr.Markers, Tool: rr.Tool,
 			Action: rr.Action, Strategy: rr.Strategy, Location: rr.Location, OS: rr.OS,
+			Recommend: rr.Recommend != nil && *rr.Recommend,
 		}
 		switch {
 		case rr.MinAge != nil:
@@ -218,6 +226,10 @@ func parsePack(name string, data []byte) ([]core.Rule, []error) {
 		}
 		if err := Validate(r); err != nil {
 			errs = append(errs, err)
+			continue
+		}
+		if rr.Recommend != nil && r.Bucket != core.Optional {
+			errs = append(errs, recommendError(r))
 			continue
 		}
 		rules = append(rules, r)

@@ -5,7 +5,8 @@ pack = "node"
 
 [[rule]]
 id = "node-modules"
-rev = 1
+rev = 2
+recommend = true
 category = "deps"
 bucket = "optional"
 kind = "project"
@@ -15,7 +16,8 @@ min_age = "30d"
 
 [[rule]]
 id = "next"
-rev = 1
+rev = 2
+recommend = true
 category = "build-output"
 bucket = "optional"
 kind = "project"
@@ -25,7 +27,8 @@ min_age = "7d"
 
 [[rule]]
 id = "nuxt"
-rev = 1
+rev = 2
+recommend = true
 category = "build-output"
 bucket = "optional"
 kind = "project"
@@ -35,7 +38,8 @@ min_age = "7d"
 
 [[rule]]
 id = "turbo"
-rev = 1
+rev = 2
+recommend = true
 category = "build-output"
 bucket = "optional"
 kind = "project"
@@ -45,7 +49,8 @@ min_age = "7d"
 
 [[rule]]
 id = "parcel-cache"
-rev = 1
+rev = 2
+recommend = true
 category = "build-output"
 bucket = "optional"
 kind = "project"
@@ -55,7 +60,8 @@ min_age = "7d"
 
 [[rule]]
 id = "svelte-kit"
-rev = 1
+rev = 2
+recommend = true
 category = "build-output"
 bucket = "optional"
 kind = "project"

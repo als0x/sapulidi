@@ -26,7 +26,7 @@ func oneCandidate(t *testing.T, f *fixture, path, key string) {
 }
 
 func TestSharedNameTargetPicksRuleWithMarker(t *testing.T) {
-	for marker, key := range map[string]string{"Cargo.toml": "rust/target@1", "pom.xml": "jvm/maven-target@1"} {
+	for marker, key := range map[string]string{"Cargo.toml": "rust/target@2", "pom.xml": "jvm/maven-target@2"} {
 		f := newFixture(t, allEcoPacks...)
 		p := mkProject(t, f.root, "proj", true, marker, "target/out.bin")
 		ageTree(t, p)
@@ -37,8 +37,8 @@ func TestSharedNameTargetPicksRuleWithMarker(t *testing.T) {
 func TestSharedNameBuildPicksRuleWithMarker(t *testing.T) {
 	cases := map[string]string{
 		"CMakeLists.txt": "c-cpp/cmake-build@1",
-		"pubspec.yaml":   "dart/dart-build@1",
-		"build.gradle":   "jvm/gradle-build@1",
+		"pubspec.yaml":   "dart/dart-build@2",
+		"build.gradle":   "jvm/gradle-build@2",
 		"pyproject.toml": "python/build@1",
 	}
 	for marker, key := range cases {
@@ -65,7 +65,7 @@ func TestSharedNameTwoMarkersOneCandidateFirstRule(t *testing.T) {
 	p := mkProject(t, f.root, "proj", true, "Cargo.toml", "pom.xml", "target/out.bin")
 	ageTree(t, p)
 	// Pack order (packs sorted by file name) puts jvm before rust: jvm wins.
-	oneCandidate(t, f, filepath.Join(p, "target"), "jvm/maven-target@1")
+	oneCandidate(t, f, filepath.Join(p, "target"), "jvm/maven-target@2")
 }
 
 func TestSharedNameProofRefusesWhenWinningMarkerAloneGone(t *testing.T) {
@@ -73,7 +73,7 @@ func TestSharedNameProofRefusesWhenWinningMarkerAloneGone(t *testing.T) {
 	p := mkProject(t, f.root, "proj", true, "Cargo.toml", "pom.xml", "target/out.bin")
 	ageTree(t, p)
 	cands, _ := scan(t, f, "build-output")
-	if len(cands) != 1 || cands[0].RuleKey != "jvm/maven-target@1" {
+	if len(cands) != 1 || cands[0].RuleKey != "jvm/maven-target@2" {
 		t.Fatalf("candidates %+v", cands)
 	}
 	if err := os.Remove(filepath.Join(p, "pom.xml")); err != nil {
@@ -95,14 +95,14 @@ func keptOne(t *testing.T, f *fixture, path, why, key string) {
 func TestSharedNameMavenYoungAndTracked(t *testing.T) {
 	f := newFixture(t, allEcoPacks...)
 	p := mkProject(t, f.root, "young", true, "pom.xml", "target/out.bin")
-	keptOne(t, f, filepath.Join(p, "target"), "young", "jvm/maven-target@1")
+	keptOne(t, f, filepath.Join(p, "target"), "young", "jvm/maven-target@2")
 
 	f = newFixture(t, allEcoPacks...)
 	p = mkProject(t, f.root, "tracked", true, "pom.xml", "target/out.bin", "target/hand.bin")
 	git(t, p, "add", "-f", "target/hand.bin")
 	git(t, p, "commit", "-m", "track")
 	ageTree(t, p)
-	keptOne(t, f, filepath.Join(p, "target"), "tracked", "jvm/maven-target@1")
+	keptOne(t, f, filepath.Join(p, "target"), "tracked", "jvm/maven-target@2")
 }
 
 func TestSharedNamePythonBuildYoung(t *testing.T) {
@@ -119,7 +119,7 @@ func TestSharedNameNestedGitKept(t *testing.T) {
 	}
 	ageTree(t, p)
 	cands, kept := scan(t, f, "build-output")
-	if len(cands) != 0 || len(kept) != 1 || kept[0].Why == "no-marker" || kept[0].RuleKey != "rust/target@1" {
+	if len(cands) != 0 || len(kept) != 1 || kept[0].Why == "no-marker" || kept[0].RuleKey != "rust/target@2" {
 		t.Fatalf("candidates %v, kept %+v", candPaths(cands), kept)
 	}
 }
@@ -127,28 +127,28 @@ func TestSharedNameNestedGitKept(t *testing.T) {
 func TestSharedNameDisabledRules(t *testing.T) {
 	// First rule (jvm) disabled: the enabled rust rule carries the candidate.
 	f := newFixture(t, allEcoPacks...)
-	f.env.Settings.(*testutil.FakeSettings).DisabledRules = map[string]bool{"jvm/maven-target@1": true}
+	f.env.Settings.(*testutil.FakeSettings).DisabledRules = map[string]bool{"jvm/maven-target@2": true}
 	p := mkProject(t, f.root, "both", true, "Cargo.toml", "pom.xml", "target/out.bin")
 	ageTree(t, p)
-	oneCandidate(t, f, filepath.Join(p, "target"), "rust/target@1")
+	oneCandidate(t, f, filepath.Join(p, "target"), "rust/target@2")
 
 	// Both disabled: as before, the first passing rule is proposed (the engine drops it).
 	f = newFixture(t, allEcoPacks...)
-	f.env.Settings.(*testutil.FakeSettings).DisabledRules = map[string]bool{"jvm/maven-target@1": true, "rust/target@1": true}
+	f.env.Settings.(*testutil.FakeSettings).DisabledRules = map[string]bool{"jvm/maven-target@2": true, "rust/target@2": true}
 	p = mkProject(t, f.root, "both", true, "Cargo.toml", "pom.xml", "target/out.bin")
 	ageTree(t, p)
 	cands, kept := scan(t, f, "build-output")
-	if len(cands) != 1 || cands[0].RuleKey != "jvm/maven-target@1" || len(kept) != 0 {
+	if len(cands) != 1 || cands[0].RuleKey != "jvm/maven-target@2" || len(kept) != 0 {
 		t.Fatalf("candidates %+v, kept %v", cands, kept)
 	}
 
 	// A single disabled rule: unchanged.
 	f = newFixture(t, allEcoPacks...)
-	f.env.Settings.(*testutil.FakeSettings).DisabledRules = map[string]bool{"rust/target@1": true}
+	f.env.Settings.(*testutil.FakeSettings).DisabledRules = map[string]bool{"rust/target@2": true}
 	p = mkProject(t, f.root, "one", true, "Cargo.toml", "target/out.bin")
 	ageTree(t, p)
 	cands, kept = scan(t, f, "build-output")
-	if len(cands) != 1 || cands[0].RuleKey != "rust/target@1" || len(kept) != 0 {
+	if len(cands) != 1 || cands[0].RuleKey != "rust/target@2" || len(kept) != 0 {
 		t.Fatalf("candidates %+v, kept %v", cands, kept)
 	}
 }
@@ -158,7 +158,7 @@ func TestSharedNameYoungKeepsYoungNotNoMarker(t *testing.T) {
 	p := mkProject(t, f.root, "proj", true, "Cargo.toml", "target/out.bin")
 	cands, kept := scan(t, f, "build-output")
 	tg := filepath.Join(p, "target")
-	if len(cands) != 0 || keptWhy(kept, tg) != "young" || len(kept) != 1 || kept[0].RuleKey != "rust/target@1" {
+	if len(cands) != 0 || keptWhy(kept, tg) != "young" || len(kept) != 1 || kept[0].RuleKey != "rust/target@2" {
 		t.Fatalf("candidates %v, kept %v", candPaths(cands), kept)
 	}
 }
@@ -171,7 +171,7 @@ func TestSharedNameTrackedKeepsTracked(t *testing.T) {
 	ageTree(t, p)
 	cands, kept := scan(t, f, "build-output")
 	tg := filepath.Join(p, "target")
-	if len(cands) != 0 || keptWhy(kept, tg) != "tracked" || len(kept) != 1 || kept[0].RuleKey != "rust/target@1" {
+	if len(cands) != 0 || keptWhy(kept, tg) != "tracked" || len(kept) != 1 || kept[0].RuleKey != "rust/target@2" {
 		t.Fatalf("candidates %v, kept %v", candPaths(cands), kept)
 	}
 }
@@ -192,7 +192,7 @@ func TestSharedNameProofRefusesWhenMarkerGone(t *testing.T) {
 	p := mkProject(t, f.root, "proj", true, "Cargo.toml", "target/out.bin")
 	ageTree(t, p)
 	cands, _ := scan(t, f, "build-output")
-	if len(cands) != 1 || cands[0].RuleKey != "rust/target@1" {
+	if len(cands) != 1 || cands[0].RuleKey != "rust/target@2" {
 		t.Fatalf("candidates %+v", cands)
 	}
 	if err := os.Remove(filepath.Join(p, "Cargo.toml")); err != nil {

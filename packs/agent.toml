@@ -42,7 +42,8 @@ min_age = "90d"
 
 [[rule]]
 id = "claude-versions"
-rev = 1
+rev = 2
+recommend = true
 category = "agent-versions"
 bucket = "optional"
 kind = "path"
@@ -51,7 +52,8 @@ min_age = "24h"
 
 [[rule]]
 id = "claude-plugin-cache"
-rev = 1
+rev = 2
+recommend = true
 category = "agent-versions"
 bucket = "optional"
 kind = "path"

@@ -6,7 +6,8 @@ pack = "code-index"
 
 [[rule]]
 id = "code-index"
-rev = 1
+rev = 2
+recommend = true
 category = "code-index"
 bucket = "optional"
 kind = "project"
