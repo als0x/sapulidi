@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 
-	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/report"
 )
 
@@ -28,7 +27,9 @@ func runReport(app *App, args []string) int {
 		return fail(app, "report", err)
 	}
 	st, _ := OpenStore() // without a store there is no growth, the rest still works
-	r, err := report.Build(env, core.Categories(), st)
+	finish := attachProgress(app, env)
+	r, err := report.Build(env, categories(), st)
+	finish()
 	if err != nil {
 		return fail(app, "report", err)
 	}

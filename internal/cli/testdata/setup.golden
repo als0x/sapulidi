@@ -1,21 +1,6 @@
-Roots:
-  /work/app (claude)
-  /work/mono/lib (claude+children)
-Skipped:
-  /srv/me: never scanned as a project folder
-  /tmp/work: temporary folder
-  /work/notes: not a repository and holds none
-  /work/shared: owned by another user
-  /mnt/disk: on another filesystem
-  /work/gone: missing or not a folder
-  /work/many: over the limit on the number of roots
+Roots: 2 repo(s) (claude, claude+children) · 8 skipped (run 'sapulidi roots' for the full list)
   discovery stopped at its time budget; some roots may be missing
-  /work/evil?[2Krepo: missing or not a folder
-Categories:
-  agent-scratch      auto      on
-  agent-transcripts  optional  off
-  deps               optional  on
-  temp               auto      on
+Categories off: agent-transcripts
 Plan (a dry run, nothing was removed):
   safe: 2 item(s), 3.0 KiB
     Claude Code        1 item(s), 2.0 KiB

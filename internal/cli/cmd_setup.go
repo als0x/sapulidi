@@ -86,14 +86,7 @@ func runSetup(app *App, args []string) int {
 			fmt.Fprintln(out, invalidConfigMessage(f))
 		}
 		printSetupRoots(out, env.Roots, skipped)
-		fmt.Fprintln(out, "Categories:")
-		for _, r := range rows {
-			state := "off"
-			if r.Enabled {
-				state = "on"
-			}
-			fmt.Fprintf(out, "  %-18s %-9s %s\n", r.Category, r.Bucket, state)
-		}
+		printSetupCategoriesOff(out, rows)
 		fmt.Fprintln(out, "Plan (a dry run, nothing was removed):")
 		printSetupPlan(out, env.Rules, sum.WouldRemove)
 		total, totalBytes := candidateTotal(sum.WouldRemove)
@@ -115,7 +108,7 @@ func runSetup(app *App, args []string) int {
 		}
 		// The default is no: only a confirmed flag, or "y" typed on a real terminal, widens the record.
 		if !withRecommended && !app.JSON && len(recKeys) > 0 {
-			withRecommended = confirm.Terminal(recommendedQuestion, "y") == nil
+			withRecommended = confirm.Terminal(setupRecommendedPrompt(sum.WouldRemove), "y") == nil
 			// The question can wait a long time, and another process may have recorded consent meanwhile.
 			if code, done := refuseExistingConsent(app); done {
 				return code
@@ -178,31 +171,65 @@ func recommendedRuleKeys(rules []core.Rule) []string {
 	return keys
 }
 
-// printSetupRoots lists the roots found and the folders discovery skipped. The paths come from transcripts and the
-// file system, so they are not trusted.
+// setupRecommendedPrompt formats the interactive prompt for recommended rules, including count and size when non-empty.
+func setupRecommendedPrompt(cands []core.Candidate) string {
+	n, b := candidateTotal(withLabel(cands, core.LabelRecommended))
+	if n == 0 {
+		return recommendedQuestion
+	}
+	return fmt.Sprintf("Also let the schedule remove recommended rows (%d item(s), %s)? [y/N] ", n, humanBytes(b))
+}
+
+// printSetupCategoriesOff prints a compact line only when any non-never category is switched off.
+func printSetupCategoriesOff(out io.Writer, rows []catSummaryJSON) {
+	var off []string
+	for _, r := range rows {
+		if r.Bucket != string(core.Never) && !r.Enabled {
+			off = append(off, safeText(r.Category))
+		}
+	}
+	if len(off) > 0 {
+		fmt.Fprintf(out, "Categories off: %s\n", strings.Join(off, ", "))
+	}
+}
+
+// printSetupRoots summarizes the roots found and the folders discovery skipped. The sources come from discovery and
+// are sanitized before printing.
 func printSetupRoots(out io.Writer, found []core.Root, skipped []core.Kept) {
-	fmt.Fprintln(out, "Roots:")
-	if len(found) == 0 {
-		fmt.Fprintln(out, "  none found")
-	}
-	for _, r := range found {
-		fmt.Fprintf(out, "  %s (%s)\n", safeText(r.Path), safeText(r.Source))
-	}
-	var lines []string
+	var skippedCount int
+	var budgetHit bool
 	for _, k := range skipped {
 		switch k.Why {
 		case "no-codex": // not a folder
 		case "budget":
-			lines = append(lines, budgetNote)
+			budgetHit = true
 		default:
-			lines = append(lines, safeText(k.Path)+": "+skipSentence(safeText(k.Why)))
+			skippedCount++
 		}
 	}
-	if len(lines) > 0 {
-		fmt.Fprintln(out, "Skipped:")
-		for _, l := range lines {
-			fmt.Fprintln(out, "  "+l)
+	var b strings.Builder
+	b.WriteString("Roots: ")
+	if len(found) == 0 {
+		b.WriteString("none found")
+	} else {
+		fmt.Fprintf(&b, "%d repo(s)", len(found))
+		srcSet := map[string]struct{}{}
+		for _, r := range found {
+			if s := safeText(r.Source); s != "" {
+				srcSet[s] = struct{}{}
+			}
 		}
+		if len(srcSet) > 0 {
+			sources := slices.Sorted(maps.Keys(srcSet))
+			fmt.Fprintf(&b, " (%s)", strings.Join(sources, ", "))
+		}
+	}
+	if skippedCount > 0 {
+		fmt.Fprintf(&b, " · %d skipped (run 'sapulidi roots' for the full list)", skippedCount)
+	}
+	fmt.Fprintln(out, b.String())
+	if budgetHit {
+		fmt.Fprintln(out, "  "+budgetNote)
 	}
 }
 
