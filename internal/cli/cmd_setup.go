@@ -104,7 +104,16 @@ func runSetup(app *App, args []string) int {
 	recorded, withRecommended := 0, false
 	if *yes {
 		withRecommended = *recommended
-		// The default is no: only the flag, or "y" typed on a real terminal, widens the record.
+		if withRecommended && len(recKeys) > 0 {
+			if code := confirmAllow(app, "setup", recKeys, "setup --yes --recommended"); code != 0 {
+				return code
+			}
+			// The question can wait a long time, and another process may have recorded consent meanwhile.
+			if code, done := refuseExistingConsent(app); done {
+				return code
+			}
+		}
+		// The default is no: only a confirmed flag, or "y" typed on a real terminal, widens the record.
 		if !withRecommended && !app.JSON && len(recKeys) > 0 {
 			withRecommended = confirm.Terminal(recommendedQuestion, "y") == nil
 			// The question can wait a long time, and another process may have recorded consent meanwhile.

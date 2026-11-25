@@ -234,6 +234,16 @@ func TestCurrentOnlyMovesForward(t *testing.T) {
 	}
 }
 
+// Only a plain X.Y.Z directory counts: any other name is never made current, however high it sorts.
+func TestCurrentIgnoresDirectoriesThatAreNotPlainVersions(t *testing.T) {
+	r := newRelease(t)
+	data := dataDir(t, "9", "9.0", "9.0.0.1", "09.0.0", "0.3.0")
+	got, err := r.install(data, "v0.4.0")
+	if err != nil || !got.Moved || current(t, data) != "0.4.0" {
+		t.Fatalf("%+v current %s %v", got, current(t, data), err)
+	}
+}
+
 // setBinary replaces the binary of an installed version.
 func setBinary(t *testing.T, data, version, body string, mode os.FileMode) {
 	t.Helper()

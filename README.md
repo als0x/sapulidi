@@ -40,13 +40,13 @@
 One command, pinned to a release tag. It verifies the binary and links it into `~/.local/bin`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.2.0/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.3.0/install.sh | sh
 ```
 
 Prefer to read the script first?
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.2.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.3.0/install.sh -o install.sh
 less install.sh
 sh install.sh            # sh install.sh --dry-run shows what it would do
 ```
@@ -54,7 +54,7 @@ sh install.sh            # sh install.sh --dry-run shows what it would do
 Everything after `--` goes to `sapulidi`, so you can install into an agent and start the schedule in one go:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.2.0/install.sh | sh -s -- --agents claude --schedule 30m
+curl -fsSL https://raw.githubusercontent.com/als0x/sapulidi/v0.3.0/install.sh | sh -s -- --agents claude --schedule 30m
 ```
 
 ### As a plugin
@@ -80,30 +80,40 @@ Inside an agent session, run `/sapulidi setup` once. It shows the roots it found
 | Label | What happens to it |
 |---|---|
 | safe | the schedule removes it once you consented (`setup --yes`) |
-| recommended | the schedule removes it only if you also allowed it (`setup --yes --recommended`, later `consent --yes --recommended`); `run --recommended` lists these rows, asks, and removes them once |
+| recommended | the schedule removes it only if you also allowed it (`setup --yes --recommended`, later `consent --yes --recommended`, both confirmed in your own terminal); `run --recommended` lists these rows, asks, and removes them once |
 | your call | listed only; it goes when you pick it in the TUI, or after you consent to its rule (`sapulidi consent`) |
 | protected | not removable now: a guard or your exclusion keeps it |
 
-The TUI opens on **places**: the folders where something was found, with what is ready, what is optional and what a guard keeps. This is a screen from the test fixtures (sample paths, not a real machine):
+The TUI opens on **places**: the folders and tools where something was found, with how much of each is **safe**, **recommended** and **your call**, and how many rows are **protected** (`rec.` and `prot.` in a narrow window). Safe and recommended rows are already selected at start; your call rows never are. This is a screen from the test fixtures (sample paths, not a real machine):
 
 ```text
 +- summary --------------------------------------------------------------------+
-| Free now: 1.9 GB automatic | 762.9 MB if you choose | 9 protected            |
-| to remove: 0 B, 0 of 6 selected | excluded: 2                                |
+| Free now: 1.9 GB safe | 2.0 GB recommended | 1.3 GB your call | 1 protected  |
+| to remove: 3.9 GB, 5 of 9 selected | excluded: 1                             |
 | agents installed: 2 | schedule: every 30m, next 14:30                        |
-| disk free: 37.3 GB -> 37.3 GB                                                |
-| not covered by any rule: searching...                                        |
+| disk free: 37.3 GB -> 41.1 GB                                                |
+| protected: 1 | g                                                             |
 +------------------------------------------------------------------------------+
-         ready  optional place                                  kept updatedAt
-  ready = removable now | optional = you pick it | kept = protected
->[ ]    1.1 GB         - ~/proj/                                   1 2026-11-21
- [ ]  762.9 MB         - ~/.nvm/versions/node/                     1 2026-11-20
- [ ]         -  762.9 MB ~/old/                                    - 2025-02-03
- [ ]    4.8 MB         - /private/tmp/claude-1000/                 6 2026-11-15
-enter open | space select | d delete | g protected | c view | ? help | q quit
+          safe      rec. your call place                        prot. updatedAt 
+  safe, recommended: preselected | your call: you pick | protected: stays
+>[x]    1.9 GB         -         - Claude Code | scratch            - 2026-10-01
+ [~]         -    1.1 GB   66.8 MB ~/proj/                          1 2026-09-01
+ [x]         -  858.3 MB         - Claude Code | versions           - 2026-10-01
+ [ ]         -         -  762.9 MB ~/off/                           - -         
+ [ ]         -         -  476.8 MB Codex | sessions                 - 2026-10-01
+ [ ]         -         -   57.2 MB Claude Code | transcripts        - 2026-10-01
+ [x]         -   38.1 MB         - Claude Code | plugin cache       - 2026-10-01
+ [x]   28.6 MB         -         - Codex | tmp                      - 2026-10-01
+ [-]         -         -         - commands | node                  - -         
+ [-]         -         -         - ~/ex/                            - -         
+
+
+
+1 safe. enter to look inside
+enter open | space toggle | d delete | g protected | c view | ? help | q quit
 ```
 
-`enter` opens a place, `space` selects, `d` shows a confirmation that lists every selected row. Keys, markers and columns are in [docs/tui.md](docs/tui.md), and `?` opens the same help inside the TUI.
+`enter` opens a place, `space` selects or clears, `d` shows a confirmation that lists every selected row. Keys, markers and columns are in [docs/tui.md](docs/tui.md), and `?` opens the same help inside the TUI.
 
 ## Commands
 
@@ -163,7 +173,7 @@ To switch the check off, set `check = false` under `[update]` in `config.toml`. 
 ## Limits
 
 - An agent that has a file-write tool in its host can write `<config>/packs/*.toml` or `applied.toml` directly, which the terminal tier cannot prevent; the host's tool permissions are the barrier there.
-- Containers and image or builder prunes are reported only; the TUI does not delete them.
+- Containers, image, builder and container prunes and the idle VM stop are never removed from the TUI; the schedule runs them only after your consent to that exact rule key (`sapulidi consent --yes <rule-key>`, confirmed in your own terminal).
 - A build folder holding a partial clone is kept.
 - More in [docs/known-limits.md](docs/known-limits.md); Windows goes through WSL ([docs/wsl.md](docs/wsl.md)).
 

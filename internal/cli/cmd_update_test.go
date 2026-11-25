@@ -248,7 +248,20 @@ func newHostEnv(t *testing.T, auto bool, routes ...string) *selfEnv {
 		t.Fatal(err)
 	}
 	st.Heartbeat("claude-code", "0.3.0")
+	t.Setenv("SAPULIDI_SCHEDULED", "1") // as the installed job sets it
 	return e
+}
+
+func TestHandTypedScheduleTriggerDoesNotUpdate(t *testing.T) {
+	for _, marker := range []string{"", "0"} {
+		e := newAutoEnv(t, true, "install.sh")
+		t.Setenv("SAPULIDI_SCHEDULED", marker)
+		scheduled(t)
+		if e.requests != 0 {
+			t.Fatalf("SAPULIDI_SCHEDULED=%q: %d requests", marker, e.requests)
+		}
+		e.untouched(t)
+	}
 }
 
 func scheduled(t *testing.T) (stdout string) {

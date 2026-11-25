@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/als0x/sapulidi/internal/core"
@@ -113,6 +114,23 @@ func TestPlanAllListsProtectedRows(t *testing.T) {
 		t.Fatalf("%d %q", code, e)
 	}
 	golden(t, "plan-all.golden", out)
+}
+
+func TestPlanEscapesPaths(t *testing.T) {
+	labelFixture(t)
+	const evil = "/work/evil\x1b[2K‮"
+	planFn = func(*core.Env, []core.Category, engine.Options) engine.Summary { // labelFixture restores it
+		return engine.Summary{
+			Mode:        "dry-run",
+			WouldRemove: []core.Candidate{{Category: "temp", Path: evil + "/gone", Label: core.LabelSafe}},
+			Kept:        []core.Kept{{Category: "temp", Path: evil + "/kept", Why: "young"}},
+		}
+	}
+	code, out, e := runCLI(t, "plan", "--all")
+	if code != 0 || strings.ContainsAny(out, "\x1b‮") ||
+		!strings.Contains(out, "/work/evil?[2K?/gone") || !strings.Contains(out, "/work/evil?[2K?/kept") {
+		t.Fatalf("%d %q %q", code, out, e)
+	}
 }
 
 // The 0.2.0 document is what the new one must be once "label" is taken out of every candidate.

@@ -88,7 +88,7 @@ func runConsent(app *App, args []string) int {
 			return fail(app, "consent", fmt.Errorf("%s is not waiting for your OK; nothing was recorded", safeText(k)))
 		}
 	}
-	var confirmed, yourCall []string
+	var confirmed, gated []string
 	var left []waitingRule
 	for _, w := range waiting {
 		var take bool
@@ -104,19 +104,17 @@ func runConsent(app *App, args []string) int {
 			continue
 		}
 		confirmed = append(confirmed, w.key)
-		if w.label == core.LabelYourCall {
-			yourCall = append(yourCall, w.key)
+		// Only safe rules keep the chat tier, however they are asked for.
+		if w.label != core.LabelSafe {
+			gated = append(gated, w.key)
 		}
 	}
-	if len(yourCall) > 0 {
-		// Terminal tier: only the user, in a real terminal, widens what the schedule removes beyond what
-		// sapulidi stands behind.
-		prompt := "This lets scheduled runs remove what these rules find:\n"
-		for _, k := range yourCall {
-			prompt += "  " + safeText(k) + "\n"
+	if len(gated) > 0 {
+		retry := "consent --yes " + safeText(strings.Join(named, " "))
+		if *recommended {
+			retry = "consent --yes --recommended"
 		}
-		retry := "--yes " + safeText(strings.Join(named, " "))
-		if code := confirmConsent(app, prompt+"Type allow to continue: ", "allow", retry); code != 0 {
+		if code := confirmAllow(app, "consent", gated, retry); code != 0 {
 			return code
 		}
 	}
@@ -221,22 +219,33 @@ func printWaiting(app *App, left []waitingRule) {
 	}
 }
 
-// confirmConsent is the terminal tier (S15) of a consent change: the user types word on the terminal. It returns 0
-// when confirmed, else the exit code after saying why; retry is how to run the command again in a terminal.
-func confirmConsent(app *App, prompt, word, retry string) int {
+// confirmAllow is the terminal tier for recommended and "your call" rules: only the user, in a real terminal,
+// widens what the schedule removes beyond the safe rules.
+func confirmAllow(app *App, name string, keys []string, retry string) int {
+	prompt := "This lets scheduled runs remove what these rules find:\n"
+	for _, k := range keys {
+		prompt += "  " + safeText(k) + "\n"
+	}
+	return confirmConsent(app, name, prompt+"Type allow to continue: ", "allow", retry)
+}
+
+// confirmConsent is the terminal tier (S15) of a consent change by the command name: the user types word on the
+// terminal. It returns 0 when confirmed, else the exit code after saying why; retry is how to run the command again
+// in a terminal.
+func confirmConsent(app *App, name, prompt, word, retry string) int {
 	err := confirm.Terminal(prompt, word)
 	switch {
 	case errors.Is(err, confirm.ErrNoTerminal):
-		msg := "run this in your own terminal: sapulidi consent " + retry
+		msg := "run this in your own terminal: sapulidi " + retry
 		fmt.Fprintln(app.Stderr, msg)
 		if app.JSON {
 			writeJSON(app.Stdout, map[string]any{"error": msg})
 		}
 		return 1
 	case errors.Is(err, confirm.ErrMismatch):
-		return fail(app, "consent", errors.New("not confirmed, nothing changed"))
+		return fail(app, name, errors.New("not confirmed, nothing changed"))
 	case err != nil:
-		return fail(app, "consent", err)
+		return fail(app, name, err)
 	}
 	return 0
 }
@@ -276,7 +285,7 @@ func revokeConsent(app *App, st *state.Store, rules []core.Rule, what string) in
 	}
 	// Terminal tier (S15), like exclude --remove: changing the consent record is the user's own act.
 	prompt := "This takes your OK back from " + safeText(what) + ".\nType revoke to continue: "
-	if code := confirmConsent(app, prompt, "revoke", "--revoke "+safeText(what)); code != 0 {
+	if code := confirmConsent(app, "consent", prompt, "revoke", "consent --revoke "+safeText(what)); code != 0 {
 		return code
 	}
 	// Read afresh only now: the confirmation can block for a long time.

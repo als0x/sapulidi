@@ -58,7 +58,7 @@ unset SAPULIDI_REPO
 builds_with() { test "$(grep -c "internal/version\.Repo=$1\$" "$LOG.ldflags")" = 4; }
 
 # fingerprint of the tracked files release.sh rewrites
-sig() { (cd "$C" && cat bin/sapulidi install.sh checksums.txt .claude-plugin/*.json .codex-plugin/plugin.json .cursor-plugin/plugin.json .antigravity-plugin/plugin.json | cksum); }
+sig() { (cd "$C" && cat bin/sapulidi install.sh checksums.txt README.md .claude-plugin/*.json .codex-plugin/plugin.json .cursor-plugin/plugin.json .antigravity-plugin/plugin.json | cksum); }
 clean() { test -z "$(git -C "$C" status --porcelain)"; }
 
 # The real compiler, offline: is there a local go that can build the copy without the network?
@@ -82,6 +82,10 @@ check "checksums.txt is complete when the suite runs" grep -q '^suite checksum_l
 check "the suite runs after the last build" test "$(tail -n 1 "$LOG" | cut -d ' ' -f 1)" = suite
 check "the suite runs once" test "$(grep -c '^suite' "$LOG")" = 1
 check "install.sh is bumped" grep -q '^SAPULIDI_VERSION=9.8.7$' "$C/install.sh"
+pins=$(grep -o 'v[0-9][0-9.]*/install\.sh' "$C/README.md")
+check "README.md has install.sh pins" test -n "$pins"
+check "every README.md install.sh pin is bumped" test "$(printf '%s\n' "$pins" | sort -u)" = v9.8.7/install.sh
+check "the printed commit includes README.md" grep -q '^  git add .*README\.md' "$work/out.txt"
 check "the printed plan bumps before it builds" test "$(grep -n 'set SAPULIDI_VERSION' "$work/out.txt" | head -n 1 | cut -d : -f 1)" -lt "$(grep -n 'build into dist' "$work/out.txt" | head -n 1 | cut -d : -f 1)"
 
 check "every build names the repository of the origin remote" builds_with acme/widget

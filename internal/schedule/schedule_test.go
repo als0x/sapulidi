@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -414,14 +415,15 @@ func unusualPaths(t *testing.T) config.Paths {
 func TestJobsCarryResolvedPaths(t *testing.T) {
 	p := unusualPaths(t)
 	want := []EnvVar{{"SAPULIDI_CONFIG", p.Config}, {"SAPULIDI_STATE", p.State}, {"SAPULIDI_DATA", p.Data}}
+	// Only the run job carries the marker that lets a run update itself; the agent job starts an AI agent.
+	marker := EnvVar{"SAPULIDI_SCHEDULED", "1"}
 	for _, j := range Jobs(p) {
-		if len(j.Env) != 3 {
-			t.Fatalf("%s env %v", j.Label, j.Env)
+		w := want
+		if j.Label == LabelRun {
+			w = append(slices.Clone(want), marker)
 		}
-		for i, w := range want {
-			if j.Env[i] != w {
-				t.Errorf("%s env[%d] = %v, want %v", j.Label, i, j.Env[i], w)
-			}
+		if !slices.Equal(j.Env, w) {
+			t.Errorf("%s env %v, want %v", j.Label, j.Env, w)
 		}
 	}
 	j := Jobs(p)[0]
@@ -510,7 +512,7 @@ func TestEnvDriftNamesChangedPaths(t *testing.T) {
 	if err := l.Install(old); err != nil {
 		t.Fatal(err)
 	}
-	if w := EnvDrift(l, j); len(w) != 3 {
+	if w := EnvDrift(l, j); len(w) != 4 {
 		t.Fatalf("old job: %v", w)
 	}
 	// not installed: nothing to compare

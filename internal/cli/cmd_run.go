@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -101,7 +102,9 @@ func runRun(app *App, args []string) int {
 	}
 	code := printRun(app, sum)
 	// A run that was held back (paused, busy, uninstalled, not set up yet) does not update either.
-	if *trigger == "schedule" && !*dry && (sum.Mode == "run" || sum.Mode == "dry-run") {
+	// The flag can be typed by anyone; the variable comes from the installed job.
+	if *trigger == "schedule" && os.Getenv("SAPULIDI_SCHEDULED") == "1" && !*dry &&
+		(sum.Mode == "run" || sum.Mode == "dry-run") {
 		autoUpdate()
 	}
 	return code
