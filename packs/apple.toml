@@ -4,7 +4,8 @@ pack = "apple"
 
 [[rule]]
 id = "derived-data"
-rev = 1
+rev = 2
+recommend = true
 category = "apple"
 bucket = "optional"
 kind = "path"

@@ -37,6 +37,11 @@ const (
 	optionalMinAge = 24 * time.Hour
 )
 
+func recommendError(r core.Rule) error {
+	return &Error{Pack: r.Pack, Rule: r.ID, Field: "recommend",
+		Msg: fmt.Sprintf("only allowed on bucket %q, not %q", core.Optional, r.Bucket)}
+}
+
 // Validate checks one rule against the schema and the registries of internal/core.
 func Validate(r core.Rule) error {
 	fail := func(field, format string, a ...any) error {
@@ -67,6 +72,9 @@ func Validate(r core.Rule) error {
 	case core.KindTemp, core.KindProject, core.KindFile, core.KindCache, core.KindVersions, core.KindPath:
 	default:
 		return fail("kind", "unknown kind %q", r.Kind)
+	}
+	if r.Recommend && r.Bucket != core.Optional {
+		return recommendError(r)
 	}
 
 	needNames := r.Kind == core.KindTemp || r.Kind == core.KindProject || r.Kind == core.KindFile

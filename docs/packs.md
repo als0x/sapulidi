@@ -22,6 +22,7 @@ min_age = "1h"
 # strategy = "keep-active-and-previous" location = "nvm-versions"   kind = "versions"
 # location = "..."            kind = "path"
 # os = ["darwin"]
+# recommend = true            bucket = "optional" only
 ```
 
 Kinds: `temp` (entries directly in the temp dir), `project` (directories inside roots next to a marker), `file`
@@ -30,6 +31,10 @@ filtered by a strategy written in Go), `path` (a known per-user location handled
 
 Ages are Go durations or whole days (`30d`), at most 10 years. The minimum is 1 h for `auto` and 24 h for
 `optional`; without `min_age` the bucket minimum applies.
+
+`recommend` (boolean, default `false`) means: Sapu Lidi stands behind removing this once the rule's guards and
+`min_age` pass. It is only valid on `optional` rules of built-in packs. Changing it bumps the rule's `rev`, so
+consent given to the old rev does not carry over.
 
 ## What the validator refuses
 
@@ -44,6 +49,8 @@ A pack with any invalid rule is ignored as a whole, and the error names the pack
   `.git`, `src`, `lib`, `app`, `docs`, `test` or `tests` in any letter case.
 - A key that does not belong to the rule's kind (`names`, `markers`, `tool`/`action`, `strategy`, `location`).
 - `os` has a value other than `darwin` or `linux`.
+- `recommend` on a rule whose bucket is not `optional` (even `false`), or a value that is not a boolean.
+- `recommend` in a user pack (even `false`): only built-in packs can recommend.
 - Any key not in the schema. Absolute paths, commands and scripts have no key, so they cannot be expressed.
 
 User packs must be regular files of at most 1 MiB owned by you, directly in `<config>/packs/`, in a directory that

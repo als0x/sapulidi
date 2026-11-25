@@ -4,7 +4,8 @@ pack = "rust"
 
 [[rule]]
 id = "target"
-rev = 1
+rev = 2
+recommend = true
 category = "build-output"
 bucket = "optional"
 kind = "project"

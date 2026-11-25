@@ -5,7 +5,8 @@ pack = "worktrees"
 
 [[rule]]
 id = "linked"
-rev = 1
+rev = 2
+recommend = true
 category = "worktrees"
 bucket = "optional"
 kind = "path"

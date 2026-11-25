@@ -185,7 +185,7 @@ func TestProjectNodeModulesOldIsCandidate(t *testing.T) {
 		t.Fatalf("candidates %v, kept %v", got, kept)
 	}
 	c := cands[0]
-	if c.Base != f.root || c.Removal != core.RenameDelete || c.Category != "deps" || c.RuleKey != "node/node-modules@1" {
+	if c.Base != f.root || c.Removal != core.RenameDelete || c.Category != "deps" || c.RuleKey != "node/node-modules@2" {
 		t.Fatalf("candidate %+v", c)
 	}
 	if !strings.HasPrefix(c.Reason, "node_modules of a project untouched for 59 days") &&

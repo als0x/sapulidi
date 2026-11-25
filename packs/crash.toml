@@ -5,7 +5,8 @@ pack = "crash"
 
 [[rule]]
 id = "dumps"
-rev = 1
+rev = 2
+recommend = true
 category = "crash"
 bucket = "optional"
 kind = "file"
