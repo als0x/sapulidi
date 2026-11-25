@@ -75,7 +75,7 @@ sapulidi plan       # dry run: what would a run remove, and what does it keep
 sapulidi setup      # roots, categories and a dry run; --yes records your consent
 ```
 
-Inside an agent session, run `/sapulidi setup` once. It shows the roots it found (from the folders your coding agents worked in), every category and the plan by label, and asks for your consent. Until you consent, scheduled and hook runs only log what they would do.
+Inside an agent session, run `/sapulidi setup` once. It shows a compact summary of the roots it found from your coding agents (`sapulidi roots` lists them all) and the plan by label, and asks for your consent. Until you consent, scheduled and hook runs only log what they would do.
 
 | Label | What happens to it |
 |---|---|
@@ -156,7 +156,7 @@ Packs say what is a leftover. The engine is the only code that deletes, and ever
 
 ## Scheduled run and agent
 
-`sapulidi schedule install` adds an OS job that runs at low priority every 30 minutes. If no host session has touched sapulidi for 30 days, the schedule falls back to a dry run, so removing the plugin cannot leave a job deleting things for long. `sapulidi pause` stops every scheduled and hook run.
+`sapulidi schedule install` adds an OS job that runs at low priority every 30 minutes. For plugin installs, if no host session has touched sapulidi for 30 days, the schedule falls back to a dry run, so removing the plugin cannot leave a job deleting things for long; standalone `install.sh` installs run on schedule without a plugin heartbeat. `sapulidi pause` stops every scheduled and hook run.
 
 The scheduled agent is optional and off by default. It judges what rules cannot (a directory that grew fast and matches no pack, orphaned worktrees) and writes proposals; it never deletes. It runs headless with a read-only tool allowlist and a cost cap of `max_usd` per run (default 0.25 USD). Review proposals with `/sapulidi review`; applying one goes through the same guards as any removal.
 
@@ -193,7 +193,7 @@ gh attestation verify sapulidi_<version>_<os>_<arch> --repo <owner>/sapulidi
 
 ## Status
 
-Tested: on macOS arm64, the launcher, the binary and the full flow (setup, plan, run, consent, schedule install and remove on launchd, check, uninstall); the TUI on a pseudo-terminal with a sandbox home (select, delete, quit, terminal restored) and read-only against a real home; and `sapulidi --agents claude` installed into and removed from a real Claude Code, with its plugin and marketplace lists identical afterwards. On Linux (Debian arm64 container, non-root): the same flow, the pty tests, a TUI scenario in a pty, and `install.sh` under dash (74 checks); in an Alpine arm64 container: the pty tests. The launcher and `install.sh` have downloaded and verified the real 0.1.0 and 0.2.0 releases from GitHub. Not yet run: `install.sh` under BusyBox ash (the Alpine image has no curl and no bash), `gh attestation verify` (0.1.0 and locally built releases have no attestation), WSL itself, and a real Claude Code session driven by a person through the `/plugin` menu. Never run: Codex, Cursor, Antigravity, OpenCode, Pi (their manifests and hooks are untested).
+Tested: on macOS arm64, the launcher, the binary and the full flow (setup, plan, run, consent, schedule install and remove on launchd, check, uninstall); the TUI on a pseudo-terminal with a sandbox home (select, delete, quit, terminal restored) and read-only against a real home; `sapulidi --agents claude` installed into and removed from a real Claude Code, with its plugin and marketplace lists identical afterwards; and for 0.3.0, a live standalone install with a real launchd scheduled run, the TUI, and the update notice. On Linux, 0.3.0 passed the Alpine arm64 container PTY tests; in the Debian arm64 container, all Go packages and 4 of 5 shell suites passed, while `tests/sh/test_release.sh` failed because the container copy excludes `.git` (blocking the rest of the Debian script: pty, scenario, TUI scenario and dash `install.sh`, which last passed in 0.2.0). The launcher and `install.sh` have downloaded and verified the real 0.1.0 and 0.2.0 releases from GitHub. Not yet run: `install.sh` under BusyBox ash (the Alpine image has no curl and no bash), `gh attestation verify` (0.1.0 and locally built releases have no attestation), WSL itself, and a real Claude Code session driven by a person through the `/plugin` menu. Never run: Codex, Cursor, Antigravity, OpenCode, Pi (their manifests and hooks are untested).
 
 ## Contributing
 
