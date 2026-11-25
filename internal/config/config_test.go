@@ -277,13 +277,13 @@ func TestSettingsNeverCategoryCannotBeEnabled(t *testing.T) {
 	}
 }
 
-func TestSettingsOptionalOffByDefault(t *testing.T) {
+func TestSettingsOptionalOnByDefault(t *testing.T) { // CG1: was ...OffByDefault
 	s := settingsFor(t, "[category.temp]\nenabled = false\n", nil)
 	if s.CategoryEnabled("temp") {
 		t.Fatal("auto category with enabled=false must be off")
 	}
-	if s.CategoryEnabled("deps") {
-		t.Fatal("optional category must be off by default")
+	if !s.CategoryEnabled("deps") { // CG1: an optional category is on unless switched off
+		t.Fatal("optional category must be on by default")
 	}
 	s = settingsFor(t, "[category.deps]\nenabled = true\n", nil)
 	if !s.CategoryEnabled("deps") || !s.CategoryEnabled("temp") {

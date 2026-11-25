@@ -33,6 +33,25 @@ type Candidate struct {
 	Created  time.Time // birth time of Path, set by the engine; zero = unknown
 	Updated  time.Time // newest change under Path, set by the engine; zero = unknown
 	Source   string    // "auto" | "optional-on" (set by the engine)
+	Label    Label     // set by the engine from the rule
+}
+
+// Label tells a person how sapulidi treats a row. A Kept is always protected.
+type Label string
+
+const (
+	LabelSafe        Label = "safe"        // an auto rule
+	LabelRecommended Label = "recommended" // an optional rule with Recommend
+	LabelYourCall    Label = "your-call"   // every other optional rule
+	LabelProtected   Label = "protected"
+)
+
+// Words is the label as people read it.
+func (l Label) Words() string {
+	if l == LabelYourCall {
+		return "your call"
+	}
+	return string(l)
 }
 
 // Kept is something a category or a guard decided to keep. Why is one token:

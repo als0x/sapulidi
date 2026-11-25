@@ -20,6 +20,18 @@ const enginePkgSuffix = "/internal/engine"
 // literal "Explicit" (a decoder key). Explicit is an in-process option; the terminal UI is its only caller.
 func explicitViolations(t testing.TB, root string) []string {
 	t.Helper()
+	return optionViolations(t, root, "Explicit", func(rel string) bool { return strings.HasPrefix(rel, "internal/tui/") })
+}
+
+// includeRecommendedViolations is the same check for IncludeRecommended, whose only caller is `run`.
+func includeRecommendedViolations(t testing.TB, root string) []string {
+	t.Helper()
+	return optionViolations(t, root, "IncludeRecommended", func(rel string) bool { return rel == "internal/cli/cmd_run.go" })
+}
+
+// optionViolations reports the uses of one engine.Options field outside internal/engine and the allowed files.
+func optionViolations(t testing.TB, root, field string, allowed func(rel string) bool) []string {
+	t.Helper()
 	var bad []string
 	for _, top := range []string{"internal", "cmd"} {
 		base := filepath.Join(root, top)
@@ -29,7 +41,7 @@ func explicitViolations(t testing.TB, root string) []string {
 			}
 			rel, _ := filepath.Rel(root, p)
 			rel = filepath.ToSlash(rel)
-			if strings.HasPrefix(rel, "internal/engine/") || strings.HasPrefix(rel, "internal/tui/") {
+			if strings.HasPrefix(rel, "internal/engine/") || allowed(rel) {
 				return nil
 			}
 			file, perr := parser.ParseFile(token.NewFileSet(), p, nil, 0)
@@ -37,7 +49,7 @@ func explicitViolations(t testing.TB, root string) []string {
 				bad = append(bad, rel+": does not parse: "+perr.Error())
 				return nil
 			}
-			for _, why := range explicitUses(file) {
+			for _, why := range optionUses(file, field) {
 				bad = append(bad, rel+": "+why)
 			}
 			return nil
@@ -46,7 +58,7 @@ func explicitViolations(t testing.TB, root string) []string {
 	return bad
 }
 
-func explicitUses(file *ast.File) []string {
+func optionUses(file *ast.File, field string) []string {
 	var out []string
 	engineNames := map[string]bool{}
 	for _, imp := range file.Imports {
@@ -66,12 +78,12 @@ func explicitUses(file *ast.File) []string {
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.KeyValueExpr:
-			if id, ok := x.Key.(*ast.Ident); ok && id.Name == "Explicit" {
-				out = append(out, "keyed literal field Explicit")
+			if id, ok := x.Key.(*ast.Ident); ok && id.Name == field {
+				out = append(out, "keyed literal field "+field)
 			}
 		case *ast.SelectorExpr:
-			if x.Sel.Name == "Explicit" {
-				out = append(out, "selector .Explicit")
+			if x.Sel.Name == field {
+				out = append(out, "selector ."+field)
 			}
 		case *ast.CompositeLit:
 			sel, ok := x.Type.(*ast.SelectorExpr)
@@ -88,8 +100,8 @@ func explicitUses(file *ast.File) []string {
 			}
 		case *ast.BasicLit:
 			if x.Kind == token.STRING {
-				if s, err := strconv.Unquote(x.Value); err == nil && s == "Explicit" {
-					out = append(out, `string literal "Explicit" (reflect or decoder key)`)
+				if s, err := strconv.Unquote(x.Value); err == nil && s == field {
+					out = append(out, "string literal "+strconv.Quote(field)+" (reflect or decoder key)")
 				}
 			}
 		}
@@ -111,6 +123,36 @@ func plantFile(t testing.TB, path, src string) {
 func TestExplicitIsSetOnlyByEngineAndTUI(t *testing.T) {
 	if bad := explicitViolations(t, repoRoot()); len(bad) > 0 {
 		t.Fatalf("engine.Options.Explicit is used outside internal/engine and internal/tui:\n%s", strings.Join(bad, "\n"))
+	}
+}
+
+func TestIncludeRecommendedIsSetOnlyByRun(t *testing.T) {
+	if bad := includeRecommendedViolations(t, repoRoot()); len(bad) > 0 {
+		t.Fatalf("engine.Options.IncludeRecommended is used outside internal/engine and cmd_run.go:\n%s",
+			strings.Join(bad, "\n"))
+	}
+}
+
+func TestIncludeRecommendedScanFlagsPlantedFiles(t *testing.T) {
+	set := "package cli\nfunc f() { o.IncludeRecommended = true }\n"
+	root := t.TempDir()
+	for _, name := range []string{"internal/engine/ok.go", "internal/cli/cmd_run.go", "internal/cli/cmd_tui.go",
+		"internal/tui/bad.go", "internal/agent/bad.go"} {
+		plantFile(t, filepath.Join(root, filepath.FromSlash(name)), set)
+	}
+	plantFile(t, filepath.Join(root, "cmd", "sapulidi", "keyed.go"),
+		"package main\nimport \"x/internal/engine\"\nvar o = engine.Options{IncludeRecommended: true}\n")
+	got := map[string]bool{}
+	for _, v := range includeRecommendedViolations(t, root) {
+		got[strings.SplitN(v, ":", 2)[0]] = true
+	}
+	for _, w := range []string{"internal/cli/cmd_tui.go", "internal/tui/bad.go", "internal/agent/bad.go", "cmd/sapulidi/keyed.go"} {
+		if !got[w] {
+			t.Errorf("%s not flagged", w)
+		}
+	}
+	if got["internal/engine/ok.go"] || got["internal/cli/cmd_run.go"] {
+		t.Errorf("allowed file flagged: %v", got)
 	}
 }
 
