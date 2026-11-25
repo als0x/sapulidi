@@ -73,6 +73,10 @@ func runRun(app *App, args []string) int {
 			fmt.Fprintf(app.Stderr, "failed: %s %s\n", f.Category, f.Path)
 		}
 	}
+	// A run that was held back (paused, busy, uninstalled) does not update either.
+	if *trigger == "schedule" && !*dry && (sum.Mode == "run" || sum.Mode == "dry-run" || sum.Mode == "no-consent") {
+		autoUpdate()
+	}
 	if len(sum.Failed) > 0 {
 		return 1
 	}
