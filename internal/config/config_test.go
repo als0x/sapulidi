@@ -420,10 +420,45 @@ func TestEffectiveNamesSource(t *testing.T) {
 		"growth_gb_per_week":    {"5", SourceDefault},
 		"category.deps.enabled": {"false", SourceApplied},
 		"notify.enabled":        {"false", SourceDefault},
+		"update.check":          {"true", SourceDefault},
+		"update.auto":           {"false", SourceDefault},
 	}
 	for k, w := range want {
 		if got[k] != w {
 			t.Errorf("%s: got %v want %v", k, got[k], w)
 		}
+	}
+}
+
+func TestLoadUpdateKeys(t *testing.T) {
+	p := paths(t)
+	c, warns, err := Load(p.Config)
+	if err != nil || len(warns) != 0 || !c.Update.Check || c.Update.Auto {
+		t.Fatalf("defaults: %+v %v %v", c.Update, warns, err)
+	}
+	write(t, p.Config, "[update]\ncheck = false\nauto = true\n")
+	c, warns, err = Load(p.Config)
+	if err != nil || len(warns) != 0 || c.Update.Check || !c.Update.Auto {
+		t.Fatalf("set: %+v %v %v", c.Update, warns, err)
+	}
+	for _, v := range c.Effective() {
+		if (v.Key == "update.check" && (v.Value != "false" || v.Source != SourceConfig)) ||
+			(v.Key == "update.auto" && (v.Value != "true" || v.Source != SourceConfig)) {
+			t.Errorf("effective: %+v", v)
+		}
+	}
+	write(t, p.Config, "[update]\ncheck = \"no\"\nauto = 1\nchannel = \"beta\"\n")
+	c, warns, err = Load(p.Config)
+	if err != nil || !c.Update.Check || c.Update.Auto {
+		t.Fatalf("bad values: %+v %v", c.Update, err)
+	}
+	for _, w := range []string{"update.check must be true or false", "update.auto must be true or false", `unknown key "update.channel"`} {
+		if !hasWarn(warns, w) {
+			t.Errorf("missing warning %q in %v", w, warns)
+		}
+	}
+	write(t, p.Config, "update = true\n")
+	if _, warns, _ = Load(p.Config); !hasWarn(warns, "update must be a table") {
+		t.Errorf("warnings %v", warns)
 	}
 }

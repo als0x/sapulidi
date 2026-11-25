@@ -311,5 +311,45 @@ publish darwin_arm64
 out=$(run sh "$S" 2>&1); rc=$?
 check "darwin arm64 installs" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
 
+# the install route is recorded in the state directory after a verified install
+new_env t15
+publish linux_amd64
+run sh "$S" >/dev/null 2>&1
+check "marker in the default state dir" test -f "$H/.local/state/sapulidi/installed-by/install.sh"
+check "state dir is private" test "$(ls -ld "$H/.local/state/sapulidi" | cut -c1-10)" = drwx------
+rm -rf "$H/.local/state"
+run sh "$S" >/dev/null 2>&1
+check "marker written when already installed" test -f "$H/.local/state/sapulidi/installed-by/install.sh"
+new_env t15b
+publish linux_amd64
+run env XDG_STATE_HOME="$T/xdg" sh "$S" >/dev/null 2>&1
+check "marker under XDG_STATE_HOME" test -f "$T/xdg/sapulidi/installed-by/install.sh"
+new_env t15c
+publish linux_amd64
+mkdir -p "$T/state/installed-by"
+echo keep >"$T/victim"
+ln -s "$T/victim" "$T/state/installed-by/install.sh"
+run env SAPULIDI_STATE="$T/state" XDG_STATE_HOME="$T/xdg" sh "$S" >/dev/null 2>&1
+check "marker under SAPULIDI_STATE, not through a planted symlink" \
+	test -f "$T/state/installed-by/install.sh" -a ! -L "$T/state/installed-by/install.sh" -a "$(cat "$T/victim")" = keep -a ! -e "$T/xdg"
+new_env t15d
+publish linux_amd64
+echo tampered >>"$REL/sapulidi_${V}_linux_amd64"
+run sh "$S" >/dev/null 2>&1
+check "no marker after a failed install" test ! -e "$H/.local/state/sapulidi/installed-by/install.sh"
+run sh "$S" --dry-run >/dev/null 2>&1
+check "no marker after a dry run" test ! -e "$H/.local/state"
+new_env t15e
+publish linux_amd64
+mkdir -p "$T/state"
+chmod 500 "$T/state"
+out=$(run env SAPULIDI_STATE="$T/state" sh "$S" -- ro 2>&1); rc=$?
+chmod 700 "$T/state"
+check "read-only state dir does not fail the install" test "$rc" = 0 -a -x "$T/data/bin/$V/sapulidi"
+check "read-only state dir still runs the arguments" grep -q '^fake sapulidi ro$' <<<"$out"
+if [ "$(id -u)" != 0 ]; then
+	check "read-only state dir is reported" grep -q 'could not record the install route' <<<"$out"
+fi
+
 echo "$n checks, $fails failed"
 [ "$fails" = 0 ]
