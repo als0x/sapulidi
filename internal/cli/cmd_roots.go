@@ -56,6 +56,27 @@ func safeText(s string) string {
 
 const budgetNote = "discovery stopped at its time budget; some roots may be missing"
 
+// skipSentences say in words why discovery dropped a folder (the tokens of roots.Discover).
+var skipSentences = map[string]string{
+	"deny":    "never scanned as a project folder",
+	"temp":    "temporary folder",
+	"not-git": "not a repository and holds none",
+	"owner":   "owned by another user",
+	"device":  "on another filesystem",
+	"missing": "missing or not a folder",
+	"cap":     "over the limit on the number of roots",
+	"nested":  "inside another root",
+	"outside": "its main repository is outside the folder",
+}
+
+// skipSentence is the sentence for a token; a token without one is shown as it is.
+func skipSentence(why string) string {
+	if s, ok := skipSentences[why]; ok {
+		return s
+	}
+	return why
+}
+
 func runRoots(app *App, args []string) int {
 	if len(args) != 0 {
 		return usageFail(app, "usage: sapulidi roots")
@@ -103,7 +124,7 @@ func runRoots(app *App, args []string) int {
 	if len(drops) > 0 {
 		fmt.Fprintln(app.Stdout, "dropped:")
 		for _, d := range drops {
-			fmt.Fprintf(app.Stdout, "  %-8s %s\n", d.Reason, d.Path)
+			fmt.Fprintf(app.Stdout, "  %-8s %s (%s)\n", d.Reason, d.Path, skipSentence(d.Reason))
 		}
 	}
 	return 0

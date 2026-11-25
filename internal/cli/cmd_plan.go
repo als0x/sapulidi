@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 func init() {
@@ -37,21 +39,30 @@ func runPlan(app *App, args []string) int {
 	if n == 0 {
 		fmt.Fprintln(out, "nothing to remove")
 	}
-	for _, c := range sum.WouldRemove {
-		fmt.Fprintf(out, "%-12s %10s  %s\n", c.Category, humanBytes(c.Bytes), c.Path)
-		fmt.Fprintf(out, "    %s\n", c.Reason)
+	for _, l := range removableLabels {
+		group := withLabel(sum.WouldRemove, l)
+		if len(group) == 0 {
+			continue
+		}
+		count, size := candidateTotal(group)
+		fmt.Fprintf(out, "%s: %d item(s), %s\n", l.Words(), count, humanBytes(size))
+		for _, c := range group {
+			fmt.Fprintf(out, "  %-17s %10s  %s\n", c.Category, humanBytes(c.Bytes), c.Path)
+			fmt.Fprintf(out, "      %s\n", c.Reason)
+		}
 	}
 	if n > 0 {
 		fmt.Fprintf(out, "total: %d candidates, %s\n", n, humanBytes(total))
 	}
 	if len(sum.Kept) > 0 {
+		fmt.Fprintf(out, "%s: %d\n", core.LabelProtected.Words(), len(sum.Kept))
 		counts, whys := keptByWhy(sum.Kept)
 		for _, w := range whys {
-			fmt.Fprintf(out, "kept (%s): %d\n", w, counts[w])
+			fmt.Fprintf(out, "  kept (%s): %d\n", w, counts[w])
 		}
 		if *all {
 			for _, k := range sum.Kept {
-				fmt.Fprintf(out, "  kept %-10s %-12s %s\n", k.Why, k.Category, k.Path)
+				fmt.Fprintf(out, "    kept %-10s %-12s %s\n", k.Why, k.Category, k.Path)
 			}
 		}
 	}

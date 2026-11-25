@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/als0x/sapulidi/internal/config"
+	"github.com/als0x/sapulidi/internal/confirm"
 	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/engine"
 )
@@ -34,12 +37,16 @@ func runRun(app *App, args []string) int {
 	dry := fs.Bool("dry-run", false, "remove nothing")
 	trigger := fs.String("trigger", "manual", "who started this run, for the log")
 	budget := fs.String("budget", "", "stop after this long, e.g. 90s or 5m")
+	recommended := fs.Bool("recommended", false, "list the recommended rows, ask, and remove them once (needs a terminal)")
 	if code, ok := parseFlags(app, fs, args); !ok {
 		return code
 	}
 	b, err := parseBudget(*budget)
 	if err != nil {
 		return usageFail(app, "sapulidi run: %v", err)
+	}
+	if *recommended && !confirm.StdioIsTerminal() {
+		return refuseNoTerminal(app)
 	}
 	env, err := app.Build()
 	if err != nil {
@@ -49,12 +56,73 @@ func runRun(app *App, args []string) int {
 	if err != nil {
 		return fail(app, "run", err)
 	}
-	sum, err := engine.Run(env, core.Categories(), st, engine.Options{
-		DryRun: *dry, Quick: *quick, Budget: b, Trigger: *trigger,
-	})
+	opt := engine.Options{DryRun: *dry, Quick: *quick, Budget: b, Trigger: *trigger}
+	if *recommended {
+		rows := withLabel(planFn(env, categories(), opt).WouldRemove, core.LabelRecommended)
+		// A path-less row cannot be named in Paths; an empty Paths would mean every row.
+		for _, c := range rows {
+			if c.Path != "" {
+				opt.Paths = append(opt.Paths, c.Path)
+			}
+		}
+		if len(opt.Paths) == 0 {
+			if !app.JSON {
+				for _, f := range invalidConfigFiles() {
+					fmt.Fprintln(app.Stdout, invalidConfigMessage(f))
+				}
+				fmt.Fprintln(app.Stdout, "no recommended rows to remove")
+				return 0
+			}
+			return printRun(app, engine.Summary{Mode: "run"})
+		}
+		switch err := confirm.Terminal(recommendedPrompt(rows), "y"); {
+		case errors.Is(err, confirm.ErrNoTerminal):
+			return refuseNoTerminal(app)
+		case errors.Is(err, confirm.ErrMismatch):
+			return fail(app, "run", errors.New("not confirmed, nothing was removed"))
+		case err != nil:
+			return fail(app, "run", err)
+		}
+		// Only the rows just shown are removed, whatever else has consent or appears meanwhile.
+		opt.IncludeRecommended = true
+	}
+	sum, err := engine.Run(env, categories(), st, opt)
 	if err != nil {
 		return fail(app, "run", err)
 	}
+	return printRun(app, sum)
+}
+
+func refuseNoTerminal(app *App) int {
+	msg := "run this in your own terminal: sapulidi run --recommended"
+	fmt.Fprintln(app.Stderr, msg)
+	if app.JSON {
+		writeJSON(app.Stdout, map[string]any{"error": msg})
+	}
+	return 1
+}
+
+// promptRows is how many recommended rows the question lists.
+const promptRows = 10
+
+// recommendedPrompt lists the recommended rows and asks whether to remove them.
+func recommendedPrompt(rows []core.Candidate) string {
+	var s strings.Builder
+	n, size := candidateTotal(rows)
+	fmt.Fprintf(&s, "%s: %d item(s), %s\n", core.LabelRecommended.Words(), n, humanBytes(size))
+	for i, c := range rows {
+		if i == promptRows {
+			fmt.Fprintf(&s, "  and %d more (sapulidi plan lists them all)\n", len(rows)-i)
+			break
+		}
+		fmt.Fprintf(&s, "  %-17s %10s  %s\n", c.Category, humanBytes(c.Bytes), safeText(c.Path))
+	}
+	s.WriteString("Remove them now? [y/N] ")
+	return s.String()
+}
+
+// printRun prints the outcome of a run and returns the exit code.
+func printRun(app *App, sum engine.Summary) int {
 	invalid := invalidConfigFiles()
 	if app.JSON {
 		writeJSON(app.Stdout, map[string]any{
