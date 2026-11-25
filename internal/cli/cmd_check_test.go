@@ -401,11 +401,13 @@ func TestUpdateCheckOnlyMakesNoCallWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestUpdateWithoutCheckOnlyIsAUsageError(t *testing.T) {
-	newUpdateEnv(t)
+func TestUpdateWithoutCheckOnlyNeedsATerminalOrYes(t *testing.T) {
+	e := newUpdateEnv(t)
+	writeFile(t, filepath.Join(e.state, "installed-by", "install.sh"), "")
+	withTerminal(t, false, "")
 	n := api(t, 200, `{"tag_name":"v0.4.0"}`)
-	for _, args := range [][]string{{"update"}, {"update", "--quiet=false"}, {"update", "--check-only", "extra"}} {
-		if _, errs, code := output(t, args...); code != 2 || errs == "" {
+	for _, args := range [][]string{{"update"}, {"update", "--quiet=false"}} {
+		if _, errs, code := output(t, args...); code != 1 || !strings.Contains(errs, "--yes") {
 			t.Errorf("%v: code %d %q", args, code, errs)
 		}
 	}
