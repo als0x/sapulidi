@@ -1,0 +1,17 @@
+{
+  "candidates": [
+    {"category": "deps", "rule": "node/dist@1", "path": "/work/app/dist", "bytes": 8192, "reason": "build output", "source": "auto"},
+    {"category": "temp", "rule": "temp/go-build@1", "path": "/tmp/go-build1", "bytes": 1024, "reason": "old go build folder", "source": "auto"},
+    {"category": "deps", "rule": "rust/target@2", "path": "/work/mono/lib/target", "bytes": 4096, "reason": "rust build output", "source": "auto"},
+    {"category": "agent-scratch", "rule": "agent/claude-scratch@1", "path": "/tmp/claude/s1", "bytes": 2048, "reason": "scratch of an old session", "source": "auto"},
+    {"category": "agent-transcripts", "rule": "agent/codex-sessions@1", "path": "/srv/me/.codex/sessions/a", "bytes": 16384, "reason": "old session", "source": "auto"}
+  ],
+  "kept": [
+    {"category": "temp", "rule": "temp/go-build@1", "path": "/tmp/go-build2", "why": "young"},
+    {"category": "temp", "rule": "temp/go-build@1", "path": "/tmp/go-build3", "why": "young"},
+    {"category": "deps", "rule": "rust/target@2", "path": "/work/app/target", "why": "open"}
+  ],
+  "waiting": ["rust/target@2"],
+  "free_bytes": 1000,
+  "invalid_config": []
+}

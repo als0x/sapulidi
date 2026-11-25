@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,6 +39,31 @@ func TestRootsShowsDropped(t *testing.T) {
 	for _, bad := range []string{"\x1b", "\r", "‮"} {
 		if strings.Contains(s, bad) {
 			t.Fatalf("control character %q reached the output:\n%q", bad, s)
+		}
+	}
+}
+
+func TestRootsSaysWhyNextToEachToken(t *testing.T) {
+	want := map[string]string{
+		"deny": "never scanned as a project folder", "temp": "temporary folder",
+		"not-git": "not a repository and holds none", "owner": "owned by another user",
+		"device": "on another filesystem", "missing": "missing or not a folder",
+		"cap": "over the limit on the number of roots", "nested": "inside another root",
+		"outside": "its main repository is outside the folder",
+	}
+	var kept []core.Kept
+	for why := range want {
+		kept = append(kept, core.Kept{Category: "roots", Path: "/work/" + why, Why: why})
+	}
+	useRoots(t, nil, kept)
+	code, out, e := runCLI(t, "roots")
+	if code != 0 {
+		t.Fatalf("%d %s", code, e)
+	}
+	for why, sentence := range want {
+		line := fmt.Sprintf("  %-8s /work/%s (%s)\n", why, why, sentence)
+		if !strings.Contains(out, line) {
+			t.Errorf("missing %q in:\n%s", line, out)
 		}
 	}
 }

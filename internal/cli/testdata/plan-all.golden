@@ -1,0 +1,21 @@
+safe: 2 item(s), 3.0 KiB
+  temp                 1.0 KiB  /tmp/go-build1
+      old go build folder
+  agent-scratch        2.0 KiB  /tmp/claude/s1
+      scratch of an old session
+recommended: 1 item(s), 4.0 KiB
+  deps                 4.0 KiB  /work/mono/lib/target
+      rust build output
+your call: 2 item(s), 24.0 KiB
+  deps                 8.0 KiB  /work/app/dist
+      build output
+  agent-transcripts   16.0 KiB  /srv/me/.codex/sessions/a
+      old session
+total: 5 candidates, 31.0 KiB
+protected: 3
+  kept (open): 1
+  kept (young): 2
+    kept young      temp         /tmp/go-build2
+    kept young      temp         /tmp/go-build3
+    kept open       deps         /work/app/target
+1 rule(s) wait for your OK: run sapulidi consent

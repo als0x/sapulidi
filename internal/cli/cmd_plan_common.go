@@ -111,6 +111,7 @@ type candidateJSON struct {
 	Created  string `json:"created,omitempty"` // RFC 3339 UTC; absent when unknown
 	Updated  string `json:"updated,omitempty"` // RFC 3339 UTC; absent when unknown
 	Source   string `json:"source,omitempty"`
+	Label    string `json:"label"`
 }
 
 func rfc3339(t time.Time) string {
@@ -130,7 +131,7 @@ type keptJSON struct {
 func candidatesJSON(cs []core.Candidate) []candidateJSON {
 	out := make([]candidateJSON, 0, len(cs))
 	for _, c := range cs {
-		out = append(out, candidateJSON{c.Category, c.RuleKey, c.Path, c.Bytes, c.Reason, rfc3339(c.Created), rfc3339(c.Updated), c.Source})
+		out = append(out, candidateJSON{c.Category, c.RuleKey, c.Path, c.Bytes, c.Reason, rfc3339(c.Created), rfc3339(c.Updated), c.Source, string(c.Label)})
 	}
 	return out
 }
@@ -168,6 +169,26 @@ func keptByWhy(ks []core.Kept) (map[string]int, []string) {
 	return counts, whys
 }
 
+// removableLabels are the labels of the rows a plan would remove, in the order people read them.
+var removableLabels = []core.Label{core.LabelSafe, core.LabelRecommended, core.LabelYourCall}
+
+// withLabel returns the candidates of one label, in the order given.
+func withLabel(cs []core.Candidate, l core.Label) []core.Candidate {
+	var out []core.Candidate
+	for _, c := range cs {
+		if c.Label == l {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// planFn and categories are the engine's plan and the registered categories; tests replace them.
+var (
+	planFn     = engine.Plan
+	categories = core.Categories
+)
+
 // planOf builds the env and runs engine.Plan on it; ok is false after an error was printed.
 func planOf(app *App, name string) (*core.Env, engine.Summary, bool) {
 	env, err := app.Build()
@@ -175,5 +196,5 @@ func planOf(app *App, name string) (*core.Env, engine.Summary, bool) {
 		fail(app, name, err)
 		return nil, engine.Summary{}, false
 	}
-	return env, engine.Plan(env, core.Categories(), engine.Options{}), true
+	return env, planFn(env, categories(), engine.Options{}), true
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -72,9 +73,14 @@ func runCheck(app *App, args []string) int {
 	if consent == nil || cerr != nil {
 		lines = append(lines, "sapulidi is installed but not set up: run /sapulidi setup")
 	} else {
-		rules, _ := loadRules(paths)
+		rules, _ := consentRules(paths)
 		if n := len(waitingRuleKeys(rules, consent)); n > 0 {
 			lines = append(lines, fmt.Sprintf("sapulidi: %d new rule(s) waiting for your OK: run /sapulidi consent", n))
+		}
+		if cfgErr == nil && len(cfg.Invalid) == 0 {
+			if l := upgradeLine(paths.State, rules, consent, cfg, st.Logger()); l != "" {
+				lines = append(lines, l)
+			}
 		}
 	}
 	if n := countProposals(st.ProposalsDir()); n > 0 {
@@ -109,6 +115,42 @@ func runCheck(app *App, args []string) int {
 		fmt.Fprintln(app.Stdout, l)
 	}
 	return 0
+}
+
+// upgradeMarker is the state file that says the 0.3 consent line has been shown.
+const upgradeMarker = "upgrade-0.3-consent"
+
+// upgradeLine tells a user who switched optional categories on before 0.3 that those now need consent. It returns
+// the line once, then "". The marker is written before the line is shown; one that cannot be written is logged and
+// means the line is shown again.
+func upgradeLine(stateDir string, rules []core.Rule, consent *config.Consent, cfg *config.Config, log core.Logger) string {
+	marker := filepath.Join(stateDir, upgradeMarker)
+	if _, err := os.Lstat(marker); err == nil {
+		return ""
+	}
+	var names []string
+	recommendedWaits := false
+	for _, r := range rules {
+		if r.Bucket != core.Optional || slices.Contains(consent.Rules, r.Key()) {
+			continue
+		}
+		recommendedWaits = recommendedWaits || r.Recommend
+		if en := cfg.Categories[r.Category].Enabled; en != nil && *en {
+			names = append(names, r.Category)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	slices.Sort(names)
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		log.Event("upgrade-marker-not-written", map[string]any{"error": err.Error()})
+	}
+	line := "Sapu Lidi now asks before removing " + strings.Join(slices.Compact(names), ", ") + ": run /sapulidi consent"
+	if recommendedWaits {
+		line += " (or /sapulidi consent --yes --recommended for the recommended rules)"
+	}
+	return line
 }
 
 // updateCheckEnabled: a development build never checks, and a config file that cannot be read may be the one that
