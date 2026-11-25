@@ -58,8 +58,11 @@ func runRun(app *App, args []string) int {
 		return fail(app, "run", err)
 	}
 	opt := engine.Options{DryRun: *dry, Quick: *quick, Budget: b, Trigger: *trigger}
+	showProgress := !*quick && *trigger != "schedule"
 	if *recommended {
+		finish := attachProgressIf(app, env, showProgress)
 		plan := planFn(env, categories(), opt)
+		finish()
 		// A path-less row cannot be named in Paths, so it is neither shown nor counted.
 		var rows []core.Candidate
 		for _, c := range withLabel(plan.WouldRemove, core.LabelRecommended) {
@@ -96,7 +99,9 @@ func runRun(app *App, args []string) int {
 		// Only the rows just shown are removed, whatever else has consent or appears meanwhile.
 		opt.IncludeRecommended = true
 	}
+	finish := attachProgressIf(app, env, showProgress)
 	sum, err := engine.Run(env, categories(), st, opt)
+	finish()
 	if err != nil {
 		return fail(app, "run", err)
 	}

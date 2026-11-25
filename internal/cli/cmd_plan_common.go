@@ -196,5 +196,7 @@ func planOf(app *App, name string) (*core.Env, engine.Summary, bool) {
 		fail(app, name, err)
 		return nil, engine.Summary{}, false
 	}
+	finish := attachProgress(app, env)
+	defer finish()
 	return env, planFn(env, categories(), engine.Options{}), true
 }
