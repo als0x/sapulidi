@@ -188,8 +188,138 @@ func TestExpandCapsAt200(t *testing.T) {
 	if len(rs) != 200 {
 		t.Fatalf("len = %d kept = %v", len(rs), ks)
 	}
-	if got := keptPaths(ks, "cap"); !slices.Equal(got, []string{filepath.Join(work, "r1200")}) {
+	if got := keptPaths(ks, "cap"); !slices.Equal(got, []string{work}) {
 		t.Fatalf("cap = %v", got)
+	}
+}
+
+func TestExpandOneCapForManyDroppedRepos(t *testing.T) {
+	f := newFixture(t)
+	for i := range 205 {
+		f.emptyRepo(t, "code/work/r"+strconv.Itoa(1000+i))
+	}
+	work := filepath.Join(f.home, "code", "work")
+	transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(work))
+	rs, ks := Discover(DiscoverEnv{Home: f.home, Config: f.cfg, Platform: f.plat, Run: f.run, Now: now, Budget: 2 * time.Minute})
+	if got := keptPaths(ks, "cap"); len(rs) != 200 || !slices.Equal(got, []string{work}) {
+		t.Fatalf("len = %d cap = %v", len(rs), got)
+	}
+}
+
+// Fake repositories count toward the limit, so they cannot run git until the budget ends.
+func TestExpandLimitsGitRunsOnFakeRepositories(t *testing.T) {
+	f := newFixture(t)
+	for i := range 230 {
+		f.mkdir(t, "code/work/r"+strconv.Itoa(1000+i)+"/.git")
+	}
+	work := filepath.Join(f.home, "code", "work")
+	transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(work))
+	rs, ks := Discover(DiscoverEnv{Home: f.home, Config: f.cfg, Platform: f.plat, Run: f.run, Now: now, Budget: 2 * time.Minute})
+	if len(rs) != 0 || len(f.run.Calls) != 221 { // the folder itself and 220 entries
+		t.Fatalf("roots = %v git ran %d times", rs, len(f.run.Calls))
+	}
+	if got := keptPaths(ks, "cap"); !slices.Equal(got, []string{work}) {
+		t.Fatalf("cap = %v", got)
+	}
+}
+
+func TestExpandRefusesFolderWithOwnGit(t *testing.T) {
+	for name, plant := range map[string]func(dotgit string) error{
+		"directory": func(p string) error { return os.Mkdir(p, 0o755) },
+		"file":      func(p string) error { return os.WriteFile(p, []byte("garbage\n"), 0o644) },
+		"symlink":   func(p string) error { return os.Symlink("gone", p) },
+	} {
+		for _, at := range []string{"code/work/sub", "code/work", "code", "."} {
+			t.Run(name+" at "+at, func(t *testing.T) {
+				f := newFixture(t)
+				f.emptyRepo(t, "code/work/sub/r")
+				sub := filepath.Join(f.home, "code", "work", "sub")
+				if err := plant(filepath.Join(f.home, at, ".git")); err != nil {
+					t.Fatal(err)
+				}
+				transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(sub))
+				rs, ks := f.discover()
+				if len(rs) != 0 || !hasKept(ks, sub, "not-git") || len(f.run.Calls) != 1 {
+					t.Fatalf("roots = %v kept = %v calls = %d", rs, ks, len(f.run.Calls))
+				}
+			})
+		}
+	}
+}
+
+func TestExpandSkipsSymlinkedDotGit(t *testing.T) {
+	f := newFixture(t)
+	real := f.emptyRepo(t, "code/elsewhere/real")
+	child := f.mkdir(t, "code/work/child")
+	f.emptyRepo(t, "code/work/child/inner")
+	if err := os.Symlink(filepath.Join(real, ".git"), filepath.Join(child, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Dir(child)
+	transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(work))
+	rs, ks := f.discover()
+	if len(rs) != 0 || !hasKept(ks, work, "not-git") || len(f.run.Calls) != 1 {
+		t.Fatalf("roots = %v kept = %v calls = %d", rs, ks, len(f.run.Calls))
+	}
+}
+
+func TestExpandRefusesPersonalFolders(t *testing.T) {
+	for _, name := range []string{"Downloads", "Desktop", "Documents", "Library", "Pictures", "Movies", "Music", "Public"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.emptyRepo(t, name+"/r")
+			f.emptyRepo(t, name+"/work/r")
+			top := filepath.Join(f.home, name)
+			below := filepath.Join(top, "work")
+			transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(top))
+			transcript(t, filepath.Join(f.home, ".claude", "projects", "slug2", "s.jsonl"), time.Hour, cwdLine(below))
+			rs, ks := f.discover()
+			if len(rs) != 0 || !hasKept(ks, top, "deny") || !hasKept(ks, below, "deny") {
+				t.Fatalf("roots = %v kept = %v", rs, ks)
+			}
+		})
+	}
+}
+
+// Neither a symlink inside a personal folder nor the real place of a symlinked one gets around the refusal.
+func TestExpandRefusesPersonalFoldersThroughSymlinks(t *testing.T) {
+	f := newFixture(t)
+	f.emptyRepo(t, "code/work/r")
+	f.emptyRepo(t, "cloud/docs/r")
+	f.mkdir(t, "Desktop")
+	inside := filepath.Join(f.home, "Desktop", "link")
+	target := filepath.Join(f.home, "cloud", "docs")
+	for link, to := range map[string]string{inside: filepath.Join(f.home, "code", "work"), filepath.Join(f.home, "Documents"): target} {
+		if err := os.Symlink(to, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(inside))
+	transcript(t, filepath.Join(f.home, ".claude", "projects", "slug2", "s.jsonl"), time.Hour, cwdLine(target))
+	rs, ks := f.discover()
+	if len(rs) != 0 || !hasKept(ks, inside, "deny") || !hasKept(ks, target, "deny") {
+		t.Fatalf("roots = %v kept = %v", rs, ks)
+	}
+}
+
+func (f *fixture) worktree(t *testing.T, main, path string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", main, "worktree", "add", "-b", "wt", path)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+func TestExpandDropsRootOutsideFolder(t *testing.T) {
+	f := newFixture(t)
+	main := f.repo(t, "code/main")
+	work := f.mkdir(t, "code/work")
+	f.worktree(t, main, filepath.Join(work, "wt"))
+	transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(work))
+	rs, ks := f.discover()
+	if len(rs) != 0 || !hasKept(ks, main, "outside") {
+		t.Fatalf("roots = %v kept = %v", rs, ks)
 	}
 }
 
@@ -247,13 +377,10 @@ func TestExpandCapKeepsDirectBeforeExpanded(t *testing.T) {
 
 func TestExpandMapsLinkedWorktreeToMain(t *testing.T) {
 	f := newFixture(t)
-	main := f.repo(t, "code/main")
-	work := f.mkdir(t, "code/work")
-	cmd := exec.Command("git", "-C", main, "worktree", "add", "-b", "wt", filepath.Join(work, "wt"))
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
+	// the main repository is hidden, so only its linked worktree is found
+	main := f.repo(t, "code/work/.main")
+	work := filepath.Dir(main)
+	f.worktree(t, main, filepath.Join(work, "wt"))
 	transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(work))
 	rs, ks := f.discover()
 	if len(rs) != 1 || rs[0] != (core.Root{Path: main, Source: "claude+children"}) {
@@ -289,6 +416,19 @@ func TestExpandStopsWhenBudgetRunsOut(t *testing.T) {
 	}
 	if len(f.run.Calls) != 2 { // the folder itself and r1
 		t.Fatalf("git ran %d times after the budget", len(f.run.Calls))
+	}
+}
+
+func TestExpandBudgetIsTheOnlyReasonForACutFolder(t *testing.T) {
+	f := newFixture(t)
+	broken := f.mkdir(t, "code/work/a/.git")
+	f.emptyRepo(t, "code/work/b")
+	work := filepath.Dir(filepath.Dir(broken))
+	transcript(t, claudeFile(f, "s1"), time.Hour, cwdLine(work))
+	run := slowRunner{FakeRunner: f.run, below: work, delay: 2100 * time.Millisecond}
+	rs, ks := Discover(DiscoverEnv{Home: f.home, Config: f.cfg, Platform: f.plat, Run: run, Now: now, Budget: 2 * time.Second})
+	if len(rs) != 0 || !hasKept(ks, "", "budget") || mentions(ks, work) {
+		t.Fatalf("roots = %v kept = %v", rs, ks)
 	}
 }
 

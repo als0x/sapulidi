@@ -27,6 +27,7 @@ const (
 	maxBytes       = 1 << 20
 	maxRoots       = 500
 	maxPerExpanded = 200
+	maxCollected   = maxPerExpanded + 20 // `.git` entries tried per folder, failures included
 	childrenSuffix = "+children"
 	maxPerFolder   = 3
 	gitTimeout     = 5 * time.Second
@@ -57,7 +58,7 @@ type cand struct {
 }
 
 // Discover returns the roots sorted by path and the candidates it dropped, each with a reason token:
-// deny, owner, device, missing, not-git, temp, nested, cap, budget. A Kept with Why "no-codex" says
+// deny, owner, device, missing, not-git, temp, nested, outside, cap, budget. A Kept with Why "no-codex" says
 // Codex discovery was skipped (core.Kept has no detail field, so the sentence is in Path).
 func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 	budget := env.Budget
@@ -73,13 +74,13 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 		return expired
 	}
 	darwin := env.Platform != nil && env.Platform.OS() == "darwin"
-	keyOf := func(p string) string {
-		k := realPath(p)
+	fold := func(p string) string {
 		if darwin {
-			k = strings.ToLower(k)
+			p = strings.ToLower(p)
 		}
-		return k
+		return p
 	}
+	keyOf := func(p string) string { return fold(realPath(p)) }
 
 	var kept []core.Kept
 	drop := func(path, why string) {
@@ -178,12 +179,19 @@ func Discover(env DiscoverEnv) ([]core.Root, []core.Kept) {
 
 	// Expanded roots come last, so a root named directly wins over the same one found in a folder.
 	for _, f := range folders {
-		if why := check(env, f, temps); why != "" {
+		why := "deny"
+		if !personal(env.Home, f.path, fold) {
+			why = check(env, f, temps)
+		}
+		if why == "" && holdsGit(env.Home, f.path, fold) {
+			why = "not-git"
+		}
+		if why != "" {
 			drop(f.path, why)
 			continue
 		}
-		found := expand(env, f, over, drop)
-		if len(found) == 0 {
+		found := expand(env, f, keyOf, over, drop)
+		if len(found) == 0 && !expired {
 			drop(f.path, "not-git")
 		}
 		cands = append(cands, found...)
