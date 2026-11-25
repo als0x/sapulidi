@@ -112,6 +112,23 @@ func TestReleaseScriptBumpsEveryPin(t *testing.T) {
 	}
 }
 
+// CI compares its checksums with the ones release.sh wrote, so both must pass the linker the same flags.
+func TestWorkflowAndReleaseScriptLinkAlike(t *testing.T) {
+	ldflags := func(rel string) string {
+		_, rest, found := strings.Cut(readRepoFile(t, rel), `-ldflags "`)
+		flags, _, closed := strings.Cut(rest, `"`)
+		if !found || !closed {
+			t.Fatalf("%s has no quoted -ldflags", rel)
+		}
+		return flags
+	}
+	script := strings.NewReplacer("$mod", "github.com/als0x/sapulidi", "$repo", "$GITHUB_REPOSITORY").
+		Replace(ldflags("scripts/release.sh"))
+	if got := ldflags(".github/workflows/release.yml"); got != script {
+		t.Errorf("release.yml links with %q, release.sh with %q", got, script)
+	}
+}
+
 func TestReadmeCoversInstallAndTUI(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(), "README.md"))
 	if err != nil {
