@@ -51,9 +51,9 @@ func openPTY(t *testing.T) (master, slave *os.File) {
 	return m, s
 }
 
-// TestTUIQuitsAndLeavesCookedMode runs the built binary in a temp HOME on a pseudo-terminal, waits for the list,
-// selects the one leftover folder in the isolated temp dir, deletes it with d and y, and quits; the folder must be
-// gone and the terminal back in cooked mode (ICANON and ECHO set).
+// TestTUIQuitsAndLeavesCookedMode runs the built binary in a temp HOME on a pseudo-terminal, waits for the places
+// list, opens ~/tmp/ to verify the preselected leftover folder, deletes it with d and y, and quits; the folder must
+// be gone and the terminal back in cooked mode (ICANON and ECHO set).
 func TestTUIQuitsAndLeavesCookedMode(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -143,8 +143,9 @@ func TestTUIQuitsAndLeavesCookedMode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	waitSeen("~/tmp/")
+	send("\r") // open the place to show the preselected row inside
 	waitSeen("go-build123")
-	send(" ") // select the row under the cursor
 	send("d")
 	waitSeen("Delete 1 item")
 	send("y")

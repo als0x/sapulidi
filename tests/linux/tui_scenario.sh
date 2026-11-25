@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The TUI in a real pseudo-terminal, as an unprivileged user, inside the Debian container (run by as_user.sh).
 # The binary runs under script(1) on a 100x30 pty; keys come through a fifo, and every step waits for the screen text
-# it needs. Run 1: q on a list with one stale go-build folder; the folder stays and the terminal is back in cooked
-# mode (stty -a shows icanon and echo). Run 2: space, d, y, q, q; only that folder goes, the sentinel file stays.
+# it needs. Run 1: q on the places list with one stale go-build folder; the folder stays and the terminal is back in
+# cooked mode (stty -a shows icanon and echo). Run 2: enter to open the place, d, y, q, q; only that folder goes, the
+# sentinel file stays.
 # SAPULIDI_TEST=1 with SAPULIDI_TEST_NO_CTIME=1 lets the planted mtimes decide age; the test hooks point the temp
 # category and the agent scratch dir into the sandbox.
 set -eu
@@ -63,7 +64,7 @@ wait_for() { # wait_for <typescript> <text>: up to 60 s for the text to show up 
 # Run 1: quit with q; the leftover must stay and the terminal must be cooked again.
 ts1="$W/run1.typescript"
 start "$ts1"
-wait_for "$ts1" go-build-stale
+wait_for "$ts1" "$W/tmp/"
 printf 'q' >&3
 status1=0
 wait "$pid" || status1=$?
@@ -73,11 +74,12 @@ check "q exits with status 0" test "$status1" -eq 0
 check "after q the terminal is in cooked mode (icanon)" grep -q ' icanon ' "$ts1"
 check "after q the terminal echoes (echo)" grep -q ' echo ' "$ts1"
 
-# Run 2: select the folder, delete it with d and y, then leave the result screen and quit.
+# Run 2: open the place, delete the preselected folder with d and y, then leave the result screen and quit.
 ts2="$W/run2.typescript"
 start "$ts2"
+wait_for "$ts2" "$W/tmp/"
+printf '\r' >&3
 wait_for "$ts2" go-build-stale
-printf ' ' >&3
 printf 'd' >&3
 wait_for "$ts2" "Delete 1 item"
 printf 'y' >&3
