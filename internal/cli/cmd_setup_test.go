@@ -2,11 +2,13 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/als0x/sapulidi/internal/core"
+	"github.com/als0x/sapulidi/internal/testutil"
 )
 
 func setupFixture(t *testing.T) {
@@ -40,8 +42,14 @@ func TestSetupWithoutRootsDoesNotSayToWriteThem(t *testing.T) {
 	env, _ := BuildEnv()
 	env.Roots = nil
 	code, out, e := runCLI(t, "setup")
-	if code != 0 || !strings.Contains(out, "Roots:\n  none found\n") {
+	want := "Roots: none found · 8 skipped (run 'sapulidi roots' for the full list)\n"
+	if code != 0 || !strings.Contains(out, want) {
 		t.Fatalf("%d %q %q", code, out, e)
+	}
+	useRoots(t, nil, nil)
+	code, out, e = runCLI(t, "setup")
+	if code != 0 || !strings.Contains(out, "Roots: none found\n") || strings.Contains(out, "skipped") {
+		t.Fatalf("no skipped: %d %q %q", code, out, e)
 	}
 }
 
@@ -99,8 +107,12 @@ func TestSetupAsksTheQuestion(t *testing.T) {
 	if code, _, e := runCLI(t, "setup", "--yes"); code != 0 {
 		t.Fatalf("%d %q", code, e)
 	}
-	if got := tty.String(); got != "Also let the schedule remove recommended rows? [y/N] " {
-		t.Fatalf("question %q", got)
+	want := "Also let the schedule remove recommended rows (1 item(s), 4.0 KiB)? [y/N] "
+	if got := tty.String(); got != want {
+		t.Fatalf("question %q, want %q", got, want)
+	}
+	if got := setupRecommendedPrompt(nil); got != recommendedQuestion {
+		t.Fatalf("empty fallback %q, want %q", got, recommendedQuestion)
 	}
 }
 
@@ -133,5 +145,55 @@ func TestSetupRecommendedNeedsYes(t *testing.T) {
 	setupFixture(t)
 	if code, _, _ := runCLI(t, "setup", "--recommended"); code != 2 {
 		t.Fatalf("code %d, want 2", code)
+	}
+}
+
+func TestSetupCompactWithManyRootsAndSkipped(t *testing.T) {
+	setupFixture(t)
+	env, _ := BuildEnv()
+	env.Roots = make([]core.Root, 0, 50)
+	sources := []string{"claude", "claude+children", "codex\x1b[2K"}
+	for i := range 50 {
+		env.Roots = append(env.Roots, core.Root{
+			Path:   fmt.Sprintf("/work/repo-%02d", i),
+			Source: sources[i%len(sources)],
+		})
+	}
+	kept := make([]core.Kept, 0, 50)
+	for i := range 50 {
+		kept = append(kept, core.Kept{
+			Category: "roots",
+			Path:     fmt.Sprintf("/work/skipped-%02d", i),
+			Why:      "not-git",
+		})
+	}
+	useRoots(t, env.Roots, kept)
+	code, out, e := runCLI(t, "setup")
+	if code != 0 {
+		t.Fatalf("%d %q", code, e)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) >= 25 {
+		t.Fatalf("expected compact output (< 25 lines), got %d lines:\n%s", len(lines), out)
+	}
+	wantRoot := "Roots: 50 repo(s) (claude, claude+children, codex?[2K) · 50 skipped (run 'sapulidi roots' for the full list)"
+	if !strings.Contains(out, wantRoot) {
+		t.Fatalf("missing %q in:\n%s", wantRoot, out)
+	}
+	if strings.Contains(out, "\x1b") {
+		t.Fatalf("unsanitized escape sequence in:\n%s", out)
+	}
+}
+
+func TestSetupOmitsCategoriesWhenAllEnabled(t *testing.T) {
+	setupFixture(t)
+	env, _ := BuildEnv()
+	env.Settings.(*testutil.FakeSettings).Categories["agent-transcripts"] = true
+	code, out, e := runCLI(t, "setup")
+	if code != 0 {
+		t.Fatalf("%d %q", code, e)
+	}
+	if strings.Contains(out, "Categories") {
+		t.Fatalf("expected Categories line to be omitted when all non-never categories are enabled:\n%s", out)
 	}
 }
