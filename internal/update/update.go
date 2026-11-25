@@ -30,7 +30,7 @@ const maxBody = 64 << 10
 // width is the number of columns a notice stays under.
 const width = 80
 
-// Cache is what is remembered about the last check: the latest tag seen and when a check was last started.
+// Cache is what the last successful check learned: the latest tag, and when.
 type Cache struct {
 	Tag       string    `json:"tag"`
 	CheckedAt time.Time `json:"checked_at"`
@@ -61,6 +61,65 @@ func SaveCache(stateDir string, c Cache) error {
 		return err
 	}
 	return atomic.WriteFile(cachePath(stateDir), append(b, '\n'))
+}
+
+// Every is how often at most a check is started.
+const Every = 24 * time.Hour
+
+// Recent reports whether t is within Every of now. A time further ahead than that (a clock that was wrong) is not.
+func Recent(t time.Time) bool {
+	age := time.Since(t)
+	return age < Every && age > -Every
+}
+
+// Claim takes the one slot per Every for starting a check: of all the processes asking at once, one wins. The
+// slot is the file <state>/update.claim and its modification time. The first claim is an exclusive create. An old
+// one is replaced by renaming <state>/update.claim.next over it, and only the process that created that file may.
+func Claim(stateDir string) (bool, error) {
+	claim := filepath.Join(stateDir, "update.claim")
+	err := createNew(claim)
+	if !errors.Is(err, fs.ErrExist) {
+		return err == nil, err
+	}
+	if old, err := isOld(claim); !old {
+		return false, err
+	}
+	next := claim + ".next"
+	if err := createNew(next); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return false, err
+		}
+		// Another process is replacing the claim, or one died doing so long ago: its file is then moved out of
+		// the way, with its old time, and a later call replaces the claim as usual.
+		if old, _ := isOld(next); old {
+			return false, os.Rename(next, claim)
+		}
+		return false, nil
+	}
+	old, err := isOld(claim) // again: the holder before this one may just have replaced it
+	if err != nil {
+		return false, err
+	}
+	if err := os.Rename(next, claim); err != nil {
+		return false, err
+	}
+	return old, nil
+}
+
+func createNew(path string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func isOld(path string) (bool, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	return !Recent(fi.ModTime()), nil
 }
 
 // Fetch asks apiBase for the latest release of repo and returns its tag. It sends one GET: no authentication, no
@@ -157,7 +216,8 @@ func Routes(stateDir string) []Route {
 
 // Notice is the line that names a newer release and how to get it, or "" when the cached tag is not newer than
 // current. marketplace is the plugin's marketplace on a host that has the /plugin command; "" for any other host.
-// The longest wording under 80 columns is used.
+// The longest wording under 80 columns is used; when none fits, the line points at `sapulidi version` instead of
+// giving the command.
 func Notice(current string, c Cache, routes []Route, marketplace string) string {
 	if version.Repo == "" || !Newer(c.Tag, current) {
 		return ""
@@ -177,16 +237,17 @@ func Notice(current string, c Cache, routes []Route, marketplace string) string 
 	if command == "" {
 		command = "see https://github.com/" + version.Repo + "/releases"
 	}
-	var line string
-	for _, line = range []string{
+	for _, line := range []string{
 		fmt.Sprintf("Sapu Lidi %s is out (you have %s). Update: %s", c.Tag, current, command),
 		fmt.Sprintf("Sapu Lidi %s is out (you have %s): %s", c.Tag, current, command),
 		fmt.Sprintf("Sapu Lidi %s (you have %s): %s", c.Tag, current, command),
 		fmt.Sprintf("Sapu Lidi %s: %s", c.Tag, command),
 	} {
 		if len(line) < width {
-			break
+			return line
 		}
 	}
-	return line
+	const short = "Sapu Lidi %s is out: run sapulidi version"
+	room := width - 1 - len(fmt.Sprintf(short, ""))
+	return fmt.Sprintf(short, c.Tag[:min(len(c.Tag), room)]) // a newer tag is ASCII: "v", digits and dots
 }

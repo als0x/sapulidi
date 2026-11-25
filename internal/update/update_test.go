@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -258,6 +260,114 @@ func TestNoticeFullWordingWhenItFits(t *testing.T) {
 	want := "Sapu Lidi v0.4.0 is out (you have 0.3.0). Update: sapulidi update"
 	if got != want {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNoticeNeverOverflows(t *testing.T) {
+	longTag := "v" + strings.Repeat("0", 90) + "9.0.0"
+	for name, c := range map[string]struct {
+		repo, tag, want string
+		routes          []Route
+	}{
+		"long repository": {strings.Repeat("o", 60) + "/sapulidi", "v0.4.0",
+			"Sapu Lidi v0.4.0 is out: run sapulidi version", nil},
+		"long tag": {testRepo, longTag,
+			"Sapu Lidi " + longTag[:40] + " is out: run sapulidi version", []Route{RoutePlugin, RouteInstallSh}},
+		"tag that fits only the short form": {testRepo, "v0000000000000000000000009.0.0",
+			"Sapu Lidi v0000000000000000000000009.0.0 is out: run sapulidi version",
+			[]Route{RoutePlugin, RouteInstallSh}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setRepo(t, c.repo)
+			got := Notice("0.3.0", Cache{Tag: c.tag}, c.routes, "als0x-sapulidi")
+			if got != c.want || len(got) >= 80 {
+				t.Fatalf("%d columns: %q, want %q", len(got), got, c.want)
+			}
+		})
+	}
+}
+
+// race runs Claim from many goroutines at once and counts the winners.
+func race(t *testing.T, dir string) int {
+	t.Helper()
+	var wins atomic.Int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			won, err := Claim(dir)
+			if err != nil {
+				t.Error(err)
+			}
+			if won {
+				wins.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	return int(wins.Load())
+}
+
+func age(t *testing.T, path string, d time.Duration) {
+	t.Helper()
+	at := time.Now().Add(-d)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaimHasOneWinnerADay(t *testing.T) {
+	for round := range 50 {
+		dir := t.TempDir()
+		claim := filepath.Join(dir, "update.claim")
+		if n := race(t, dir); n != 1 {
+			t.Fatalf("round %d, no claim yet: %d winners", round, n)
+		}
+		age(t, claim, 23*time.Hour)
+		if n := race(t, dir); n != 0 {
+			t.Fatalf("round %d, claim of today: %d winners", round, n)
+		}
+		for _, old := range []time.Duration{25 * time.Hour, -48 * time.Hour} { // yesterday's, or a clock that was wrong
+			age(t, claim, old)
+			if n := race(t, dir); n != 1 {
+				t.Fatalf("round %d, claim aged %v: %d winners", round, old, n)
+			}
+		}
+		fi, err := os.Stat(claim)
+		if err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("claim %v %v", fi, err)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+			t.Fatalf("round %d: left behind %v", round, entries)
+		}
+	}
+}
+
+// A process that died while replacing an old claim must not stop checks for good.
+func TestClaimRecoversFromAnAbandonedReplacement(t *testing.T) {
+	dir := t.TempDir()
+	claim := filepath.Join(dir, "update.claim")
+	for _, p := range []string{claim, claim + ".next"} {
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		age(t, p, 25*time.Hour)
+	}
+	first, err1 := Claim(dir)
+	second, err2 := Claim(dir)
+	third, err3 := Claim(dir)
+	if first || !second || third || err1 != nil || err2 != nil || err3 != nil {
+		t.Fatalf("%v %v %v / %v %v %v", first, second, third, err1, err2, err3)
+	}
+}
+
+func TestClaimThatCannotBeWritten(t *testing.T) {
+	if won, err := Claim(filepath.Join(t.TempDir(), "absent")); won || err == nil {
+		t.Fatalf("%v %v", won, err)
 	}
 }
 

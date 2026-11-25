@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/als0x/sapulidi/internal/config"
+	"github.com/als0x/sapulidi/internal/core"
 	"github.com/als0x/sapulidi/internal/exclude"
 	"github.com/als0x/sapulidi/internal/execx"
 	"github.com/als0x/sapulidi/internal/install"
@@ -90,7 +91,7 @@ func runCheck(app *App, args []string) int {
 		lines = append(lines, "sapulidi: "+f)
 	}
 	if cfgErr == nil && updateCheckEnabled(cfg) {
-		refreshUpdateCache(paths.State)
+		refreshUpdateCache(paths.State, st.Logger())
 		marketplace := install.Marketplace
 		if *host != "" && *host != "claude-code" {
 			marketplace = "" // only Claude Code has the /plugin command
@@ -115,9 +116,6 @@ func runCheck(app *App, args []string) int {
 func updateCheckEnabled(cfg *config.Config) bool {
 	return version.Repo != "" && len(cfg.Invalid) == 0 && cfg.Update.Check
 }
-
-// updateEvery is how often at most a check is started.
-const updateEvery = 24 * time.Hour
 
 // startWait bounds how long check waits for the child to be started (not for it to finish).
 const startWait = 100 * time.Millisecond
@@ -144,23 +142,31 @@ var startUpdateCheck = func() error {
 	return cmd.Process.Release()
 }
 
-// refreshUpdateCache starts a check when the last one is a day old. The start time is recorded first, so only one
-// child starts a day, and none when it cannot be recorded. Every failure is silent.
-func refreshUpdateCache(stateDir string) {
-	c, _ := update.LoadCache(stateDir) // an unreadable cache is an empty one, and is overwritten
-	now := time.Now()
-	if age := now.Sub(c.CheckedAt); age >= 0 && age < updateEvery {
+// refreshUpdateCache starts a check when the cache is a day old and this process wins the day's claim, so one
+// child starts a day however many checks run at once. Only the child writes the cache. A child that cannot be
+// started is logged and otherwise ignored.
+func refreshUpdateCache(stateDir string, log core.Logger) {
+	c, _ := update.LoadCache(stateDir) // an unreadable cache is an empty one
+	if update.Recent(c.CheckedAt) {
 		return
 	}
-	c.CheckedAt = now
-	if update.SaveCache(stateDir, c) != nil {
+	notStarted := func(err error) {
+		log.Event("update-check-not-started", map[string]any{"error": err.Error()})
+	}
+	won, err := update.Claim(stateDir)
+	if err != nil {
+		notStarted(err)
+	}
+	if !won {
 		return
 	}
 	start := startUpdateCheck
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = start()
+		if err := start(); err != nil {
+			notStarted(err)
+		}
 	}()
 	select {
 	case <-done:

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,14 +95,57 @@ func TestCheckStartsOneChildPerDay(t *testing.T) {
 			if e.started != 1 {
 				t.Fatalf("started %d children", e.started)
 			}
-			c, err := update.LoadCache(e.state)
-			if err != nil || time.Since(c.CheckedAt) > time.Minute {
-				t.Fatalf("start time not recorded: %+v %v", c, err)
+			if _, err := os.Stat(filepath.Join(e.state, "update.claim")); err != nil {
+				t.Fatalf("no claim: %v", err)
 			}
-			if age > 0 && c.Tag != "v0.3.0" {
-				t.Fatalf("the cached tag was lost: %+v", c)
+			c, err := update.LoadCache(e.state)
+			if age > 0 && (err != nil || c.Tag != "v0.3.0" || time.Since(c.CheckedAt) < 24*time.Hour) {
+				t.Fatalf("check wrote the cache: %+v %v", c, err)
 			}
 		})
+	}
+}
+
+func TestConcurrentChecksStartOneChildAndKeepItsTag(t *testing.T) {
+	for _, claimed := range []bool{false, true} {
+		for range 10 {
+			e := newUpdateEnv(t)
+			e.cache(t, "v0.3.0", 48*time.Hour)
+			if claimed { // yesterday's claim is there to be replaced
+				claim := filepath.Join(e.state, "update.claim")
+				writeFile(t, claim, "")
+				old := time.Now().Add(-25 * time.Hour)
+				if err := os.Chtimes(claim, old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var started atomic.Int32
+			startUpdateCheck = func() error { // a child that answers at once
+				started.Add(1)
+				return update.SaveCache(e.state, update.Cache{Tag: "v0.5.0", CheckedAt: time.Now()})
+			}
+			var wg sync.WaitGroup
+			begin := make(chan struct{})
+			for range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-begin
+					var out, errb bytes.Buffer
+					if code := Main([]string{"check"}, &out, &errb); code != 0 {
+						t.Errorf("code %d %q", code, errb.String())
+					}
+				}()
+			}
+			close(begin)
+			wg.Wait()
+			if n := started.Load(); n != 1 {
+				t.Fatalf("claimed %v: %d children", claimed, n)
+			}
+			if c, err := update.LoadCache(e.state); err != nil || c.Tag != "v0.5.0" {
+				t.Fatalf("claimed %v: the child's tag was overwritten: %+v %v", claimed, c, err)
+			}
+		}
 	}
 }
 
@@ -154,20 +200,36 @@ func TestUpdateCheckChildIsDetached(t *testing.T) {
 
 func TestCheckStartsNoChildWhenTheStartCannotBeRecorded(t *testing.T) {
 	e := newUpdateEnv(t)
-	// A directory where the cache file belongs makes the write fail.
-	writeFile(t, filepath.Join(e.state, "update.json", "x"), "")
-	if _, errs, code := output(t, "check"); code != 0 || e.started != 0 {
+	// An old directory where the claim file belongs cannot be replaced.
+	claim := filepath.Join(e.state, "update.claim")
+	writeFile(t, filepath.Join(claim, "x"), "")
+	old := time.Now().Add(-25 * time.Hour)
+	if err := os.Chtimes(claim, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, errs, code := output(t, "check"); code != 0 || errs != "" || e.started != 0 {
 		t.Fatalf("code %d started %d %q", code, e.started, errs)
+	}
+	e.wantLog(t, "update-check-not-started")
+}
+
+func (e *updateEnv) wantLog(t *testing.T, sub string) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(e.state, "log.jsonl"))
+	if err != nil || !strings.Contains(string(b), sub) {
+		t.Fatalf("log lacks %q: %q %v", sub, b, err)
 	}
 }
 
-func TestCheckIgnoresAStarterThatFails(t *testing.T) {
-	newUpdateEnv(t)
+func TestCheckLogsAStarterThatFails(t *testing.T) {
+	e := newUpdateEnv(t)
 	startUpdateCheck = func() error { return errors.New("no fork") }
 	out, errs, code := output(t, "check")
 	if code != 0 || errs != "" || strings.Contains(out, "no fork") {
 		t.Fatalf("code %d %q %q", code, out, errs)
 	}
+	e.wantLog(t, "update-check-not-started")
+	e.wantLog(t, "no fork")
 }
 
 func TestCheckDoesNotWaitForABlockedStarter(t *testing.T) {
@@ -342,9 +404,33 @@ func TestUpdateCheckOnlyMakesNoCallWhenDisabled(t *testing.T) {
 func TestUpdateWithoutCheckOnlyIsAUsageError(t *testing.T) {
 	newUpdateEnv(t)
 	n := api(t, 200, `{"tag_name":"v0.4.0"}`)
-	for _, args := range [][]string{{"update"}, {"update", "--quiet"}, {"update", "--check-only", "extra"}} {
+	for _, args := range [][]string{{"update"}, {"update", "--quiet=false"}, {"update", "--check-only", "extra"}} {
 		if _, errs, code := output(t, args...); code != 2 || errs == "" {
 			t.Errorf("%v: code %d %q", args, code, errs)
+		}
+	}
+	if *n != 0 {
+		t.Fatalf("%d requests", *n)
+	}
+}
+
+func TestUpdateQuietCoversUsageErrors(t *testing.T) {
+	newUpdateEnv(t)
+	n := api(t, 200, `{"tag_name":"v0.4.0"}`)
+	for _, args := range [][]string{
+		{"update", "--quiet"},
+		{"update", "-quiet"},
+		{"update", "--quiet=true"},
+		{"update", "--check-only", "--quiet", "extra"},
+		{"update", "--check-only", "extra", "--quiet"},
+		{"update", "--bogus", "--quiet"},
+		{"update", "--quiet", "--check-only=maybe"},
+		{"update", "--quiet", "--help"},
+		{"--json", "update", "--bogus", "--quiet"},
+		{"--json", "update", "--quiet"},
+	} {
+		if out, errs, code := output(t, args...); code != 0 || out != "" || errs != "" {
+			t.Errorf("%v: code %d %q %q", args, code, out, errs)
 		}
 	}
 	if *n != 0 {

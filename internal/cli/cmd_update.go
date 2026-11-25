@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -24,10 +25,25 @@ func init() {
 	Register(Command{Name: "update", Summary: "ask whether a newer release exists (--check-only)", Run: runUpdate})
 }
 
+// runUpdate: with --quiet anywhere in the arguments nothing is printed, a usage error included, and the exit code
+// is 0.
 func runUpdate(app *App, args []string) int {
+	for _, a := range args {
+		switch a {
+		case "--quiet", "-quiet", "--quiet=true", "-quiet=true":
+			silent := *app
+			silent.Stdout, silent.Stderr = io.Discard, io.Discard
+			updateCommand(&silent, args)
+			return 0
+		}
+	}
+	return updateCommand(app, args)
+}
+
+func updateCommand(app *App, args []string) int {
 	fs := newFlags(app, "update")
 	checkOnly := fs.Bool("check-only", false, "only ask for the latest release and remember it")
-	quiet := fs.Bool("quiet", false, "print nothing and exit 0; errors go to the log")
+	fs.Bool("quiet", false, "print nothing and exit 0; errors go to the log") // handled by runUpdate
 	if code, ok := parseFlags(app, fs, args); !ok {
 		return code
 	}
@@ -36,7 +52,6 @@ func runUpdate(app *App, args []string) int {
 	}
 	tag, off, err := checkLatest()
 	switch {
-	case *quiet:
 	case err != nil:
 		return fail(app, "update", err)
 	case app.JSON:
