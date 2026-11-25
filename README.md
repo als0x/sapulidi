@@ -31,6 +31,7 @@
 - **One deleter.** A small Go binary does every removal. The plugin for your agent only asks it to.
 - **Rebuildable or untouched.** A path goes only when it can be rebuilt, nothing uses it, and you did not choose it on purpose. Secrets, source, `.git`, unsaved work and anything outside your project roots are never removed, whatever the config says.
 - **You see it first.** `sapulidi plan` shows what a run would remove and what it keeps. Nothing is deleted before you consent.
+- **Every row has a label.** **safe** goes on the schedule once you consented, **recommended** only if you also allowed it, **your call** only when you pick it, and **protected** stays.
 - **Works with your agent.** Plugins for Claude Code, Codex, Cursor, Antigravity, OpenCode and Pi, with 24 built-in packs for the tools they leave files behind (Node, Rust, Python, JVM, Dart, Swift, containers and more).
 - **Checked downloads.** The launcher and `install.sh` verify every binary against the SHA-256 in [`checksums.txt`](checksums.txt) before it runs.
 
@@ -74,7 +75,14 @@ sapulidi plan       # dry run: what would a run remove, and what does it keep
 sapulidi setup      # roots, categories and a dry run; --yes records your consent
 ```
 
-Inside an agent session, run `/sapulidi setup` once. It shows the roots it will scan and every category, and asks for your consent. Until you consent, scheduled and hook runs only log what they would do.
+Inside an agent session, run `/sapulidi setup` once. It shows the roots it found (from the folders your coding agents worked in), every category and the plan by label, and asks for your consent. Until you consent, scheduled and hook runs only log what they would do.
+
+| Label | What happens to it |
+|---|---|
+| safe | the schedule removes it once you consented (`setup --yes`) |
+| recommended | the schedule removes it only if you also allowed it (`setup --yes --recommended`, later `consent --yes --recommended`); `run --recommended` lists these rows, asks, and removes them once |
+| your call | listed only; it goes when you pick it in the TUI, or after you consent to its rule (`sapulidi consent`) |
+| protected | not removable now: a guard or your exclusion keeps it |
 
 The TUI opens on **places**: the folders where something was found, with what is ready, what is optional and what a guard keeps. This is a screen from the test fixtures (sample paths, not a real machine):
 
@@ -107,6 +115,8 @@ enter open | space select | d delete | g protected | c view | ? help | q quit
 | `explain <path>` | size, owner, git state, matching rule and guard for one path |
 | `exclude <path>` | never touch that path (`--list`, `--remove <path>`) |
 | `schedule`, `pause`, `resume` | the scheduled run, and a switch that stops every run |
+| `consent` | list the rules that wait for your OK, record it, or take it back (`--revoke`) |
+| `update` | install the latest release (`--check-only` only asks) |
 | `agents` | list agent tools; `--agents <name>\|all` installs into one, add `--remove` to undo |
 | `uninstall` | remove the schedule and downloaded binaries; `--all` also config and state |
 
@@ -117,7 +127,7 @@ enter open | space select | d delete | g protected | c view | ? help | q quit
 | Bucket | Meaning | Default |
 |---|---|---|
 | auto | pure leftovers, rebuildable, past an age, not in use | on after your consent |
-| optional | rebuildable but costly to rebuild, or ownership less clear | off; enable per category with an age |
+| optional | rebuildable but costly to rebuild, or ownership less clear | listed; removed only with consent to the rule, or when you pick it |
 | never | not rebuildable or chosen by you | never removed, whatever the config says |
 
 Never removed, in every pack: secrets and credentials (`.env*`, `*.pem`, `*.key`, `id_*`, `*.tfstate*`; a directory containing one is kept whole), source, `.git`, files tracked by git, unsaved work (dirty, untracked, stashed or unpushed), container volumes, models, agent memory and settings, live sessions, `Downloads`, `Trash`, `Documents`, `Desktop`, anything outside your roots, anything needing `sudo`, network mounts and other filesystems.
@@ -139,6 +149,16 @@ Packs say what is a leftover. The engine is the only code that deletes, and ever
 `sapulidi schedule install` adds an OS job that runs at low priority every 30 minutes. If no host session has touched sapulidi for 30 days, the schedule falls back to a dry run, so removing the plugin cannot leave a job deleting things for long. `sapulidi pause` stops every scheduled and hook run.
 
 The scheduled agent is optional and off by default. It judges what rules cannot (a directory that grew fast and matches no pack, orphaned worktrees) and writes proposals; it never deletes. It runs headless with a read-only tool allowlist and a cost cap of `max_usd` per run (default 0.25 USD). Review proposals with `/sapulidi review`; applying one goes through the same guards as any removal.
+
+## Updates
+
+A release build asks GitHub once a day whether a newer release exists. When there is one, `sapulidi check` (at session start), `sapulidi version` and the TUI show one line that says how to get it.
+
+- Installed with `install.sh`: `sapulidi update` shows where it downloads from, asks, verifies the checksum and installs. To let the scheduled run do it, set `auto = true` under `[update]` in `config.toml`.
+- Installed as a plugin: update the plugin in your host. In Claude Code that is `/plugin update sapulidi@als0x-sapulidi`.
+- Claude Code plugin auto-update: open `/plugin`, go to **Marketplaces**, choose `als0x-sapulidi` and enable auto-update. These menu names are not verified in a live session and may differ in your version.
+
+To switch the check off, set `check = false` under `[update]` in `config.toml`. What the check sends and what an update trusts: [docs/known-limits.md](docs/known-limits.md#updates-030).
 
 ## Limits
 

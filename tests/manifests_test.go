@@ -112,6 +112,23 @@ func TestReleaseScriptBumpsEveryPin(t *testing.T) {
 	}
 }
 
+// CI compares its checksums with the ones release.sh wrote, so both must pass the linker the same flags.
+func TestWorkflowAndReleaseScriptLinkAlike(t *testing.T) {
+	ldflags := func(rel string) string {
+		_, rest, found := strings.Cut(readRepoFile(t, rel), `-ldflags "`)
+		flags, _, closed := strings.Cut(rest, `"`)
+		if !found || !closed {
+			t.Fatalf("%s has no quoted -ldflags", rel)
+		}
+		return flags
+	}
+	script := strings.NewReplacer("$mod", "github.com/als0x/sapulidi", "$repo", "$GITHUB_REPOSITORY").
+		Replace(ldflags("scripts/release.sh"))
+	if got := ldflags(".github/workflows/release.yml"); got != script {
+		t.Errorf("release.yml links with %q, release.sh with %q", got, script)
+	}
+}
+
 func TestReadmeCoversInstallAndTUI(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(), "README.md"))
 	if err != nil {
@@ -145,6 +162,66 @@ func TestKnownLimitsListV11(t *testing.T) {
 		if !strings.Contains(string(data), w) {
 			t.Errorf("known-limits.md does not mention %q", w)
 		}
+	}
+}
+
+// requireIn fails for every word that text lacks.
+func requireIn(t *testing.T, where, text string, words ...string) {
+	t.Helper()
+	for _, w := range words {
+		if !strings.Contains(text, w) {
+			t.Errorf("%s does not mention %q", where, w)
+		}
+	}
+}
+
+func readRepoFile(t *testing.T, rel string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(), rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// section is the text under the "## title" heading, up to the next one.
+func section(t *testing.T, text, title string) string {
+	t.Helper()
+	_, rest, found := strings.Cut(text, "\n## "+title+"\n")
+	if !found {
+		t.Fatalf("no section %q", title)
+	}
+	body, _, _ := strings.Cut(rest, "\n## ")
+	return body
+}
+
+func TestReadmeCoversLabelsAndUpdates(t *testing.T) {
+	readme := readRepoFile(t, "README.md")
+	for _, title := range []string{"Why", "Quick start"} {
+		requireIn(t, "README.md "+title, section(t, readme, title), "safe", "recommended", "your call", "protected")
+	}
+	requireIn(t, "README.md Updates", section(t, readme, "Updates"), "sapulidi update", "once a day",
+		"auto-update", "/plugin", "not verified", "check = false")
+}
+
+func TestSkillLeavesConsentAndUpdateToTheUser(t *testing.T) {
+	skill := readRepoFile(t, "skills/sapulidi/SKILL.md")
+	requireIn(t, "SKILL.md Labels", section(t, skill, "Labels"), "safe", "recommended", "your call", "protected")
+	requireIn(t, "SKILL.md", skill,
+		"Never run `consent`, `run --recommended` or `update` for the user", "never add `--recommended`")
+	if strings.Contains(skill, "`consent --yes`") {
+		t.Error("SKILL.md still lets the agent run consent --yes")
+	}
+}
+
+func TestKnownLimitsCoverUpdatesAndRecommendedRules(t *testing.T) {
+	limits := readRepoFile(t, "docs/known-limits.md")
+	requireIn(t, "known-limits.md", limits, "api.github.com", "once a day", "check = false", "same repository")
+	recommended, _ := embeddedRules(t)
+	list := section(t, limits, "Recommended rules")
+	for _, key := range recommended {
+		name, _, _ := strings.Cut(key, "@")
+		requireIn(t, "known-limits.md Recommended rules", list, "`"+name+"`")
 	}
 }
 

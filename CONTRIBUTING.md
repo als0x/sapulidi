@@ -40,6 +40,9 @@ The owner runs `scripts/release.sh <version>`, which bumps the launcher and ever
 binaries, writes `checksums.txt` and runs the checks, then prints the commit, tag and push commands. Pushing a
 `v*` tag starts the release workflow. Nothing else publishes.
 
+The binaries check for updates in one GitHub repository, set at build time: `SAPULIDI_REPO=owner/repo` when set,
+otherwise the repository the `origin` remote names. The script refuses to run with neither.
+
 The workflow refuses a tag whose commit is not on `main`, runs `bash tests/run.sh`, builds with the toolchain named
 in `go.mod`, compares the checksums with the committed `checksums.txt`, attests the binaries and `checksums.txt`,
 and creates a **draft** release. Look at the draft, then publish it by hand.

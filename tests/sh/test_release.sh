@@ -27,14 +27,25 @@ new_copy() {
 	LOG=$work/$1.log
 	mkdir -p "$C" "$F"
 	(cd "$root" && git ls-files -co --exclude-standard -z | tar -c --null -T -) | tar -x -C "$C"
-	cp "$fixture/go" "$F/go"
-	chmod +x "$F/go"
+	cp "$fixture/go" "$F/go-fake"
+	# "go" records the -ldflags of every build in a file next to the log, then runs the fake go.
+	cat >"$F/go" <<'EOF'
+#!/bin/sh
+prev=
+for a in "$@"; do
+	[ "$prev" != -ldflags ] || echo "$a" >>"$FAKE_LOG.ldflags"
+	prev=$a
+done
+exec "${0%/*}/go-fake" "$@"
+EOF
+	chmod +x "$F/go" "$F/go-fake"
 	if [ "${2:-}" = stub ]; then
 		cp "$fixture/run.sh" "$C/tests/run.sh"
 		chmod +x "$C/tests/run.sh"
 	fi
 	: >"$LOG"
 	git -C "$C" init -q
+	git -C "$C" remote add origin https://github.com/acme/widget.git
 	git -C "$C" add -A
 	git -C "$C" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q -m copy
 }
@@ -42,6 +53,9 @@ new_copy() {
 release() { # args...: runs release.sh in the copy with the fake go first on PATH; extra environment goes before it
 	(cd "$C" && PATH="$F:$PATH" FAKE_LOG="$LOG" bash scripts/release.sh "$@") >"$work/out.txt" 2>&1
 }
+unset SAPULIDI_REPO
+# builds_with <owner/repo>: all four builds were told that release repository
+builds_with() { test "$(grep -c "internal/version\.Repo=$1\$" "$LOG.ldflags")" = 4; }
 
 # fingerprint of the tracked files release.sh rewrites
 sig() { (cd "$C" && cat bin/sapulidi install.sh checksums.txt .claude-plugin/*.json .codex-plugin/plugin.json .cursor-plugin/plugin.json .antigravity-plugin/plugin.json | cksum); }
@@ -69,6 +83,63 @@ check "the suite runs after the last build" test "$(tail -n 1 "$LOG" | cut -d ' 
 check "the suite runs once" test "$(grep -c '^suite' "$LOG")" = 1
 check "install.sh is bumped" grep -q '^SAPULIDI_VERSION=9.8.7$' "$C/install.sh"
 check "the printed plan bumps before it builds" test "$(grep -n 'set SAPULIDI_VERSION' "$work/out.txt" | head -n 1 | cut -d : -f 1)" -lt "$(grep -n 'build into dist' "$work/out.txt" | head -n 1 | cut -d : -f 1)"
+
+check "every build names the repository of the origin remote" builds_with acme/widget
+
+# The built binary reports it: the real compiler with the ldflags release.sh passed, for this machine.
+if [ "$have_go" = 1 ]; then
+	ldflags=$(head -n 1 "$LOG.ldflags")
+	(cd "$C" && env -u GOFLAGS GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$ldflags" -o "$work/repobin" ./cmd/sapulidi) >/dev/null 2>&1
+	report=$(env -i HOME="$work/home" "$work/repobin" version --json 2>&1)
+	check "the built binary reports the repository" test "$report" = '{"repo":"acme/widget","version":"9.8.7"}'
+else
+	echo "skip: the local go cannot build offline (GOTOOLCHAIN=local, GOPROXY=off); the reported repository was not checked"
+fi
+
+# The other forms of a GitHub remote.
+for url in git@github.com:acme/widget.git ssh://git@github.com/acme/widget https://github.com/acme/widget; do
+	new_copy remote stub
+	git -C "$C" remote set-url origin "$url"
+	release 9.8.7; rc=$?
+	check "origin $url: exits 0" test "$rc" = 0
+	check "origin $url: names acme/widget" builds_with acme/widget
+	rm -rf "$C" "$F" "$LOG.ldflags"
+done
+
+new_copy envrepo stub
+(cd "$C" && PATH="$F:$PATH" FAKE_LOG="$LOG" SAPULIDI_REPO=other/fork bash scripts/release.sh 9.8.7) >"$work/out.txt" 2>&1; rc=$?
+check "SAPULIDI_REPO: exits 0" test "$rc" = 0
+check "SAPULIDI_REPO wins over the remote" builds_with other/fork
+
+new_copy envonly stub
+git -C "$C" remote remove origin
+(cd "$C" && PATH="$F:$PATH" FAKE_LOG="$LOG" SAPULIDI_REPO=other/fork bash scripts/release.sh 9.8.7) >"$work/out.txt" 2>&1; rc=$?
+check "SAPULIDI_REPO without a remote: exits 0" test "$rc" = 0
+check "SAPULIDI_REPO without a remote: used" builds_with other/fork
+
+# No usable repository: refused before anything is touched.
+refused() { # label
+	check "$1: exit 1" test "$rc" = 1
+	check "$1: nothing built" test "$(grep -c '^build' "$LOG")" = 0
+	check "$1: the files are as they were" test "$(sig)" = "$before"
+	check "$1: the refusal names SAPULIDI_REPO" grep -q 'SAPULIDI_REPO' "$work/out.txt"
+}
+new_copy norepo stub
+git -C "$C" remote remove origin
+before=$(sig)
+release 9.8.7; rc=$?
+refused "no remote and no SAPULIDI_REPO"
+
+new_copy otherhost stub
+git -C "$C" remote set-url origin https://gitlab.example.invalid/acme/widget.git
+before=$(sig)
+release 9.8.7; rc=$?
+refused "a remote that is not on GitHub"
+
+new_copy badenv stub
+before=$(sig)
+(cd "$C" && PATH="$F:$PATH" FAKE_LOG="$LOG" SAPULIDI_REPO='not a repo' bash scripts/release.sh 9.8.7) >"$work/out.txt" 2>&1; rc=$?
+refused "a malformed SAPULIDI_REPO"
 
 # The real suites that the stub stood in for must pass on the bumped tree, or a release could never finish.
 (cd "$C" && bash tests/sh/test_install.sh) >"$work/bumped-install.txt" 2>&1; rc=$?
