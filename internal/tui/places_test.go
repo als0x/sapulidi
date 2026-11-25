@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 const (
@@ -30,7 +32,7 @@ func placesRows() []Row {
 		{Path: "/home/user/.nvm/versions/node/v16.20.2", Bytes: 500_000_000, Created: day(2025, 1, 1), Updated: day(2026, 1, 1), Source: SrcAuto, Category: "node", RuleKey: "node/nvm@1"},
 		{Path: "/home/user/.nvm/versions/node/v18.0.0", Bytes: 300_000_000, Created: day(2025, 2, 1), Updated: day(2026, 2, 1), Source: SrcAuto, Category: "node", RuleKey: "node/nvm@1"},
 		{Path: "/home/user/.nvm/versions/node/v24.22.1", Bytes: -1, Updated: day(2026, 11, 20), Source: SrcKept, Guard: "active", Category: "node", RuleKey: "node/nvm@1"},
-		{Path: "/home/user/proj/node_modules", Bytes: 1_200_000_000, Created: day(2026, 3, 2), Updated: day(2026, 11, 1), Source: SrcOptionalOn, Category: "node", RuleKey: "node/nm@1"},
+		{Path: "/home/user/proj/node_modules", Bytes: 1_200_000_000, Created: day(2026, 3, 2), Updated: day(2026, 11, 1), Source: SrcOptionalOn, Label: core.LabelRecommended, Category: "node", RuleKey: "node/nm@1"},
 		{Path: "/home/user/proj/target", Bytes: 700_000_000, Updated: day(2026, 9, 9), Source: SrcExcluded, Base: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
 		{Path: "/home/user/proj/.worktrees/a1", Bytes: -1, Updated: day(2026, 11, 21), Source: SrcKept, Guard: "dirty", Category: "git", RuleKey: "git/wt@1"},
 		{Path: "/home/user/old/node_modules", Bytes: 800_000_000, Created: day(2024, 5, 1), Updated: day(2025, 2, 3), Source: SrcOptionalOff, Category: "node", RuleKey: "node/nm@1"},
@@ -40,10 +42,7 @@ func placesRows() []Row {
 	}
 }
 
-func placesModel() Model {
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: placesRows(), Summary: placesSummary()})
-	return m
-}
+func placesModel() Model { return scanned(placesRows(), placesSummary()) }
 
 func placeNames(m Model) []string {
 	out := []string{}
@@ -169,7 +168,7 @@ func TestBothSpellingsOfABaseShareOnePlace(t *testing.T) {
 
 func TestSpaceOnAManyRowPlaceSaysSo(t *testing.T) {
 	m, _ := keys(scratchModel(), "jjj ")
-	if want := "selected 2 ready rows in " + pScratch + " (enter to see them)"; m.Status != want {
+	if want := "selected 2 rows in " + pScratch + " (enter to see them)"; m.Status != want {
 		t.Fatalf("status %q, want %q", m.Status, want)
 	}
 	one, _ := keys(placesModel(), "jj ") // ~/old/ has no ready row; nvm below has two
@@ -202,8 +201,7 @@ func scratchRows() []Row {
 func scratchModel() Model {
 	s := placesSummary()
 	s.Bases = []string{"/private/tmp/claude-1000"}
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: scratchRows(), Summary: s})
-	return m
+	return scanned(scratchRows(), s)
 }
 
 func TestScratchRowsShareOnePlace(t *testing.T) {
@@ -216,7 +214,7 @@ func TestScratchRowsShareOnePlace(t *testing.T) {
 	for _, p := range g.places() {
 		if strings.HasPrefix(p.Name, "/private/") {
 			n++
-			if p.Name != pScratch || p.ReadyN != 2 || p.KeptN != 6 || !p.Updated.Equal(day(2026, 11, 15)) {
+			if p.Name != pScratch || p.readyN() != 2 || p.KeptN != 6 || !p.Updated.Equal(day(2026, 11, 15)) {
 				t.Errorf("scratch place: %+v", p)
 			}
 		}
@@ -506,7 +504,7 @@ func TestSelectionFromOneViewIsDeletedFromAnother(t *testing.T) {
 }
 
 func TestOptionalRowsStaySelectedWhenOGoesOff(t *testing.T) {
-	m, _ := keys(listModel(), "oa")
+	m, _ := keys(listModel(), "ojj ")
 	if !m.Selected["/home/user/old/node_modules"] {
 		t.Fatal("setup")
 	}
@@ -551,9 +549,9 @@ func TestConfirmSaysWhenRowsAreNotInTheListYouCameFrom(t *testing.T) {
 	if s := confirmText(m); !strings.Contains(s, "4 of them are not shown") {
 		t.Fatalf("search:\n%s", s)
 	}
-	// flat list: o a o d leaves an optional row selected and hidden
-	m, _ = keys(listModel(), "oaod")
-	if s := confirmText(m); !strings.Contains(s, "1 of them are not shown") || !strings.Contains(s, "optional and currently switched off") {
+	// flat list: o, space, o, d leaves a switched off row selected and hidden
+	m, _ = keys(listModel(), "ojj od")
+	if s := confirmText(m); !strings.Contains(s, "1 of them are not shown") || !strings.Contains(s, "in categories you switched off") {
 		t.Fatalf("o a o d:\n%s", s)
 	}
 	// space in place A, then place B: the entry of A shows its place, the rows of B do not
@@ -581,7 +579,7 @@ func manyRows(n int) []Row {
 }
 
 func TestConfirmScrollsAndYConfirmsAtAnyPosition(t *testing.T) {
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: manyRows(40), Summary: placesSummary()})
+	m := scanned(manyRows(40), placesSummary())
 	m, _ = Update(m, ResizeMsg{Width: 80, Height: 24})
 	m, _ = keys(m, "ad")
 	if m.Screen != ScreenConfirm || len(m.Confirm) != 40 {
@@ -637,7 +635,7 @@ func TestConfirmScrollsAndYConfirmsAtAnyPosition(t *testing.T) {
 }
 
 func placesAfterScan(rows []Row) Model {
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: placesSummary()})
+	m := scanned(rows, placesSummary())
 	m, _ = Update(m, ResizeMsg{Width: 80, Height: 24})
 	return m
 }
@@ -653,7 +651,7 @@ func TestExclusionDuringDeleteKeepsThePlacesCursor(t *testing.T) {
 	}
 	// the last place, with many flat rows before it: the cursor must stay a place index
 	many := manyRows(30)
-	m, _ = Update(NewModel(true), ScanDoneMsg{Rows: append(many, Row{Path: "/zz/last", Bytes: 1, Source: SrcAuto}), Summary: placesSummary()})
+	m = scanned(append(many, Row{Path: "/zz/last", Bytes: 1, Source: SrcAuto}), placesSummary())
 	m, _ = keys(m, "jdy")
 	m, _ = Update(m, ExclusionChangedMsg{Path: "/s/p03", Excluded: true})
 	if m.Cursor >= len(m.places()) {
@@ -663,15 +661,16 @@ func TestExclusionDuringDeleteKeepsThePlacesCursor(t *testing.T) {
 
 func TestAInAPlaceSelectsReadyRowsOnly(t *testing.T) {
 	m, _ := keys(placesModel(), "jj<enter>a") // ~/old/ holds only an optional row
-	if len(m.Selected) != 0 || !strings.Contains(m.Status, "no ready rows") {
+	if len(m.Selected) != 0 || !strings.Contains(m.Status, "no safe or recommended rows") {
 		t.Fatalf("optional-only place: %v %q", m.Selected, m.Status)
 	}
 	rows := []Row{
 		{Path: "/home/user/mix/a", Bytes: 10, Source: SrcAuto},
-		{Path: "/home/user/mix/b", Bytes: 20, Source: SrcOptionalOn},
+		{Path: "/home/user/mix/b", Bytes: 20, Source: SrcOptionalOn, Label: core.LabelRecommended},
 		{Path: "/home/user/mix/c", Bytes: 30, Source: SrcOptionalOff},
+		{Path: "/home/user/mix/d", Bytes: 40, Source: SrcOptionalOn, Label: core.LabelYourCall},
 	}
-	mix, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: placesSummary()})
+	mix := scanned(rows, placesSummary())
 	mix, _ = keys(mix, "<enter>a")
 	if !reflect.DeepEqual(mix.Selected, map[string]bool{"/home/user/mix/a": true, "/home/user/mix/b": true}) {
 		t.Fatalf("selected %v", mix.Selected)
@@ -686,15 +685,14 @@ func TestStatusLinesSayOneRowAndTheirOwnSort(t *testing.T) {
 	p := placesModel()
 	p.Sort = SortAge
 	p, _ = keys(p, "/zzz<enter>")
-	if s := screen(p); !strings.Contains(s, "0 places, sorted by ready + optional size") || strings.Contains(s, "age, oldest") {
+	if s := screen(p); !strings.Contains(s, "0 places, sorted by size") || strings.Contains(s, "age, oldest") {
 		t.Fatalf("places status:\n%s", s)
 	}
 }
 
 func emptyPlacesModel() Model {
 	rows := []Row{{Path: "/home/user/work/repo/.venv", Bytes: -1, Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1"}}
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: placesSummary()})
-	return m
+	return scanned(rows, placesSummary())
 }
 
 func init() {

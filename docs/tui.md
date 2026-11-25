@@ -1,26 +1,43 @@
 # The TUI
 
 Run `sapulidi` with no arguments in a terminal. It scans, then opens on a list of **places**: the folders where it
-found something (a project, a toolchain folder). The TUI is for a person in a terminal; an agent uses `plan` and
-`report`. Every deletion still goes through the engine and its safety checks.
+found something (a project, a toolchain folder), with the leftovers of coding agents under the agent's name. The TUI
+is for a person in a terminal; an agent uses `plan` and `report`. Every deletion still goes through the engine and its
+safety checks.
+
+## The four labels
+
+| Label | Meaning |
+|---|---|
+| safe | the schedule removes it once you consented |
+| recommended | Sapu Lidi would remove it; the schedule does so only if you allowed recommended rows in `setup` |
+| your call | listed only: never preselected, never removed by the schedule. Every row of a category you switched off is one |
+| protected | not removable now: a guard keeps it (the reason is shown with `g`) or you excluded it |
+
+**At start every safe and recommended row is already selected.** Look through the selection, then press `d`; nothing is
+removed before you confirm, and the confirmation lists every selected row, including the ones in places you have not
+opened.
 
 ## Reading the screen
 
-The first line of the summary answers the question: what is free now automatically, what you can free if you choose,
-and how many rows are protected. The summary also shows the amount to remove, the excluded count, the schedule and
-the free disk space.
+The first line of the summary says how much is safe, how much is recommended, how much is your call and how many rows
+are protected. In a narrow window it reads `rec.` and `kept` for recommended and protected. The summary also shows the
+amount to remove, the excluded count, the schedule and the free disk space. When a newer release is known from the
+last update check, one more line says how to update; the TUI itself never uses the network.
 
 | Column | Meaning |
 |---|---|
-| ready | removable now: the rules allow it and you have consented |
-| optional | rules that are switched off: listed, never preselected |
-| kept | rows a guard protects, with the reason (shown with `g`) |
+| safe, recommended, your call | the size of the rows of the place with that label (`rec.` under 100 columns) |
+| protected | the number of rows a guard protects (`prot.` under 100 columns) |
 | updatedAt | the newest change among the rows of the place |
+
+Rows of agent rules are grouped by agent, not by folder: `Claude Code · scratch`, `transcripts`, `versions` and
+`plugin cache`, and `Codex · sessions` and `tmp`.
 
 Markers: `[ ]` nothing selected, `[x]` everything you can select in the place is selected, `[~]` some of it,
 `[-]` nothing in the place can be selected.
 
-`enter` opens a place and lists its rows with size, age, updatedAt and source. Optional rows are always listed there.
+`enter` opens a place and lists its rows with size, age, updatedAt and label.
 
 ## Keys
 
@@ -28,16 +45,16 @@ Markers: `[ ]` nothing selected, `[x]` everything you can select in the place is
 |---|---|
 | `up` `down` | move |
 | `enter` | open a place, or a row's detail |
-| `space` | select. On a place: every ready row in it, never the optional ones. A place with only optional rows asks `y`/`n` first. In a place with both, `space` takes the ready rows only, so its box stays `[~]`; open it with `enter` and pick the optional rows there |
-| `a` | select all ready rows (in the flat list: every row in view) |
+| `space` | select or clear. On a place: its safe and recommended rows. A place with only your call rows asks `y`/`n` first. In a mixed place `space` leaves the your call rows, so its box stays `[~]`; open it with `enter` and pick them there |
+| `a` | select the safe and recommended rows in view, never a your call one; on the places it clears them when all are already selected |
 | `d` | delete the selection; the confirmation scrolls with `up` `down`, `j` `k`, `PgUp` `PgDn` |
 | `x` | exclude the path for good (the same as `sapulidi exclude`) |
 | `c` | switch between the places and the flat list |
-| `o` | show optional rows in the flat list (the places always list them) |
-| `g` | show what a guard keeps, with the reason; on the places it also lists places that hold only kept rows |
+| `o` | show the rows of switched off categories in the flat list (the places always list them) |
+| `g` | show what is protected, with the reason; on the places it also lists places that hold only protected rows |
 | `u` | read-only list of big folders no rule covers |
 | `/` `s` | search, sort |
-| `?` | help screen: columns, markers and keys |
+| `?` | help screen: labels, markers and keys |
 | `esc` `q` | back, quit |
 
 ## Selection

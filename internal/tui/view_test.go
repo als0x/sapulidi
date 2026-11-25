@@ -30,8 +30,7 @@ func scanningModel() Model {
 func pausedModel() Model {
 	s := fixtureSummary()
 	s.Paused = true
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: s})
-	return flat(m)
+	return flat(scanned(fixtureRows(), s))
 }
 
 func resultModel() Model {
@@ -49,8 +48,7 @@ func emptyModel() Model {
 		{Path: "/home/user/old/node_modules", Bytes: 800_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/node-modules@1"},
 		{Path: "/home/user/work/repo/.venv", Bytes: -1, Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1"},
 	}
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
-	return flat(m)
+	return flat(scanned(rows, fixtureSummary()))
 }
 
 func script(s string) func() Model {
@@ -81,7 +79,7 @@ var goldenCases = []struct {
 	{"sort_updated", script("ss")},
 	{"sort_path", script("sss")},
 	{"detail", script("<enter>")},
-	{"confirm", script("oad")},
+	{"confirm", script("oajj jjj d")}, // `a`, then the switched off row and the group by hand
 	{"result", resultModel},
 	{"excluded_row", cursorOn("/home/user/proj2/target")},
 	{"kept_row", func() Model {

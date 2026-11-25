@@ -36,8 +36,7 @@ func groupRows(n int) []Row {
 }
 
 func modelWith(rows []Row) Model {
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: fixtureSummary()})
-	return flat(m)
+	return flat(scanned(rows, fixtureSummary()))
 }
 
 func TestExclusionWhileConfirmOpenNeverDeletesTheRow(t *testing.T) {
@@ -273,12 +272,12 @@ func TestUnknownSizesSayAtLeast(t *testing.T) {
 }
 
 func TestFilterMatchesShownSourceText(t *testing.T) {
-	m, _ := keys(listModel(), "/optional · on")
-	if got := pathsOf(m.visible()); len(got) != 2 {
+	m, _ := keys(listModel(), "/recommended")
+	if got := pathsOf(m.visible()); len(got) != 1 {
 		t.Fatalf("shown label does not match: %v", got)
 	}
-	m, _ = keys(listModel(), "/optional-on")
-	if got := pathsOf(m.visible()); len(got) != 2 {
+	m, _ = keys(listModel(), "/protected-excluded")
+	if got := pathsOf(m.visible()); len(got) != 1 {
 		t.Fatalf("plain label does not match: %v", got)
 	}
 }
@@ -388,7 +387,12 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 		m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()}) // starts on the places
 		m, _ = Update(m, UncoveredMsg{Unknown: unknownSummary().Unknown})
 		want := map[string]bool{} // the selection, tracked by rules of its own
-		var sp string             // the open optional-rows question, tracked by rules of its own
+		for _, r := range fixtureRows() {
+			if isReady(r) {
+				want[r.Path] = true // the start state: safe and recommended rows are selected
+			}
+		}
+		var sp string // the open optional-rows question, tracked by rules of its own
 		apply := func(msg Msg) {
 			shadowMsg(want, &sp, m, msg)
 			m, _ = Update(m, msg)

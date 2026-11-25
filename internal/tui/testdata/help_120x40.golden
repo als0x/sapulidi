@@ -1,29 +1,35 @@
 What you are looking at
 
-Columns
-  ready     removable now: a rule is on and every guard passed
-  optional  removable only if you pick it (a rule that is switched off)
-  kept      protected: a guard keeps it (open files, unsaved work, ...)
-  place     the folder or tool cache the rows belong to
-  In the flat list the source column says the same: auto = ready.
+The four labels (columns of the places, label column of the flat list)
+  safe         the schedule removes it once you consented
+  recommended  Sapu Lidi would remove it; the schedule only if you
+               allowed recommended rows in setup
+  your call    listed only: never preselected, never removed on schedule
+               (also every row of a category you switched off)
+  protected    not removable now: a guard keeps it (open files, unsaved
+               work, ...) or you excluded it; places show a count
+  place        the folder, tool cache or agent the rows belong to
+
+At start every safe and recommended row is selected. Look through the
+selection, then press d: nothing is removed before you confirm.
 
 Markers
   [ ] not selected   [x] selected   [~] some rows of a place selected
   [-] nothing here can be selected
-  The box of a place counts every row you can select in it, ready or
-  optional: [x] only when all of them are selected.
+  The box of a place counts every row you can select in it, whatever its
+  label: [x] only when all of them are selected.
 
 Keys
   enter  open a place, or show the details of a row
-  space  select a row; on a place: select its ready rows. A place with
-         only optional rows asks first: y selects them, n or esc not.
-         With ready and optional rows, space takes the ready ones only
-         (the box stays [~], never [x]); pick the optional ones with enter
-  a      places: select the ready rows of the places in view
-         inside a place: its ready rows; flat list: every row in view
-         (optional ones too once o shows them)
-  o      flat list: show or hide optional rows (places always list them)
-  g      show or hide protected (kept) rows
+  space  select or clear a row; on a place: its safe and recommended
+         rows. A place with only your call rows asks first: y selects
+         them, n or esc not. In a mixed place pick your call rows with
+         enter (the box stays [~] until you do)
+  a      select the safe and recommended rows in view, never your call
+         ones; on the places, a clears them when all are selected
+  o      flat list: show or hide the rows of switched off categories
+         (places always list them)
+  g      show or hide protected rows
   c      switch between the places and the flat list
   x      exclude the row under the cursor (flat list, inside a place)
          from every future run; on the places, open a place first
@@ -31,10 +37,4 @@ Keys
   u      folders that no rule covers (read-only)
   / search   s sort   esc back   q quit
 
-A selection counts for the whole scan, whatever the list shows: the
-confirmation lists everything that will be deleted.
-Kept rows are never removable from here.
-
-
-
-esc or ? close | q quit
+lines 1-39 of 42 | up/down scroll | esc or ? close | q quit

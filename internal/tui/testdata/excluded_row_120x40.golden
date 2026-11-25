@@ -1,21 +1,21 @@
 +- summary ------------------------------------------------------------------------------------------------------------+
-| Free now: 4.1 GB automatic | 762.9 MB if you choose | 1 protected                                                    |
+| Free now: 2.9 GB safe | 1.1 GB recommended | 820.2 MB your call | 1 protected                                        |
 | to remove: 0 B, 0 of 6 selected | excluded: 1                                                                        |
 | agents installed: 2 | schedule: every 30m, next 14:30                                                                |
 | disk free: 37.3 GB -> 37.3 GB                                                                                        |
-| optional (off): 1 | 762.9 MB | o                                                                                     |
-| kept: 1 | g                                                                                                          |
+| switched off: 1 | 762.9 MB | o                                                                                       |
+| protected: 1 | g                                                                                                     |
 | not covered by any rule: searching...                                                                                |
 +----------------------------------------------------------------------------------------------------------------------+
-          size path                                                                    age   updatedAt  source          
-  auto = removable now | optional = you pick it | kept = protected
- [ ]    2.9 GB /home/user/.cache/go-build                                              22mo  2026-11-01 auto            
- [ ]    1.1 GB /home/user/proj/node_modules                                            8mo   2026-06-30 optional-on     
->[-]  667.6 MB /home/user/proj2/target                                                 10mo  2026-09-09 excluded        
- [-]  476.8 MB /home/user/.npm/_cacache                                                15mo  2026-11-20 auto            
- [ ]   57.2 MB /home/user/containers/stopped                                           54d   2026-10-02 optional-on     
- [ ]   19.1 MB /home/user/a/very/long/directory/n...the/path/column/of/the/list/target -     -          auto            
- [ ]    9.5 MB /home/user/zz                                                           -     2026-11-10 auto            
+          size path                                                               age   updatedAt  label                
+  safe, recommended: preselected | your call: you pick | protected: stays
+ [ ]    2.9 GB /home/user/.cache/go-build                                         22mo  2026-11-01 safe                 
+ [ ]    1.1 GB /home/user/proj/node_modules                                       8mo   2026-06-30 recommended          
+>[-]  667.6 MB /home/user/proj2/target                                            10mo  2026-09-09 protected-excluded   
+ [-]  476.8 MB /home/user/.npm/_cacache                                           15mo  2026-11-20 safe                 
+ [ ]   57.2 MB /home/user/containers/stopped                                      54d   2026-10-02 your call            
+ [ ]   19.1 MB /home/user/a/very/long/directory.../path/column/of/the/list/target -     -          safe                 
+ [ ]    9.5 MB /home/user/zz                                                      -     2026-11-10 safe                 
 
 
 
@@ -37,4 +37,4 @@
 
 
 excluded by you; x removes the exclusion
-enter detail | space select | d delete | o optional | c view | ? help | q quit
+enter detail | space select | d delete | o off rows | c view | ? help | q quit

@@ -1,17 +1,17 @@
 +- summary --------------------------------------------------------------------+
-| Free now: 0 B automatic | 762.9 MB if you choose | 1 protected               |
+| Free now: 0 B safe | 0 B recommended | 762.9 MB your call | 1 protected      |
 | to remove: 0 B, 0 of 1 selected | excluded: 0                                |
 | agents installed: 2 | schedule: every 30m, next 14:30                        |
 | disk free: 37.3 GB -> 37.3 GB                                                |
-| optional (off): 1 | 762.9 MB | o                                             |
-| kept: 1 | g                                                                  |
+| switched off: 1 | 762.9 MB | o                                               |
+| protected: 1 | g                                                             |
 | not covered by any rule: searching...                                        |
 +------------------------------------------------------------------------------+
-          size path                            age   updatedAt  source          
-  auto = removable now | optional = you pick it | kept = protected
-  nothing is ready to delete
-  optional (off): 1 | 762.9 MB | o
-  kept: 1 | g
+          size path                       age   updatedAt  label                
+  safe, recommended: preselected | your call: you pick | protected: stays
+  nothing to remove here
+  switched off: 1 | 762.9 MB | o
+  protected: 1 | g
 
 
 
@@ -21,4 +21,4 @@
 
 
 0 rows, sorted by size, largest first
-enter detail | space select | d delete | o optional | c view | ? help | q quit
+enter detail | space select | d delete | o off rows | c view | ? help | q quit

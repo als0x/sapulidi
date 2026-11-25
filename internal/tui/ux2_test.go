@@ -12,8 +12,7 @@ func mixedModel() Model {
 		Row{Path: "/home/user/mix/a", Bytes: 100_000_000, Source: SrcAuto, Category: "node", RuleKey: "node/nm@1"},
 		Row{Path: "/home/user/mix/b", Bytes: 300_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/nm@1"},
 	)
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: placesSummary()})
-	return m
+	return scanned(rows, placesSummary())
 }
 
 const pMix = "~/mix/"
@@ -95,7 +94,7 @@ func TestSpaceOnOptionalOnlyPlaceAsks(t *testing.T) {
 	m, _ = keys(m, " ")
 	m.Plain = true
 	got := placesStatus(m, m.places(), 120)
-	want := "Select all 1 optional row in ~/old/ (762.9 MB)?  y: yes | n / esc: no"
+	want := "Select 1 row (your call) in ~/old/ (762.9 MB)?  y: yes | n / esc: no"
 	if got != want {
 		t.Fatalf("prompt %q, want %q", got, want)
 	}
@@ -167,9 +166,9 @@ func TestPromptSizeWithUnknownPartUsesPlus(t *testing.T) {
 		{Path: "/home/user/old/a", Bytes: 800_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/nm@1"},
 		{Path: "/home/user/old/b", Bytes: -1, Source: SrcOptionalOff, Category: "node", RuleKey: "node/nm@1"},
 	}
-	m, _ := Update(NewModel(true), ScanDoneMsg{Rows: rows, Summary: placesSummary()})
+	m := scanned(rows, placesSummary())
 	m, _ = keys(m, " ")
-	if got := placesStatus(m, m.places(), 120); !strings.Contains(got, "Select all 2 optional rows in ~/old/ (762.9 MB+)?") {
+	if got := placesStatus(m, m.places(), 120); !strings.Contains(got, "Select 2 rows (your call) in ~/old/ (762.9 MB+)?") {
 		t.Fatalf("prompt %q", got)
 	}
 }
@@ -180,15 +179,15 @@ func TestSpaceOnMixedPlaceSelectsReadyOnlyAndSaysSo(t *testing.T) {
 	if !reflect.DeepEqual(m.Selected, map[string]bool{"/home/user/mix/a": true}) || m.PlacePrompt != "" {
 		t.Fatalf("selected %v prompt %q", m.Selected, m.PlacePrompt)
 	}
-	want := "1 ready row selected; 1 optional row (286.1 MB) stay unselected: enter to pick them"
+	want := "selected 1 row; your call: 1 row (286.1 MB), enter to pick"
 	if m.Status != want {
 		t.Fatalf("status %q", m.Status)
 	}
-	// with the optional row already selected, nothing is said about optional rows
+	// with the your call row already selected, nothing is said about it
 	m2 := onPlace(t, mixedModel(), pMix)
 	m2.Selected = map[string]bool{"/home/user/mix/b": true}
 	m2, _ = keys(m2, " ")
-	if strings.Contains(m2.Status, "optional") {
+	if strings.Contains(m2.Status, "your call") {
 		t.Fatalf("status %q", m2.Status)
 	}
 }

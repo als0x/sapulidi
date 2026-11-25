@@ -201,11 +201,12 @@ func (d *fakeDeps) deleted() [][]string {
 	return append([][]string(nil), d.deletes...)
 }
 
+// threeRows are "your call" rows: nothing is preselected, so a scripted session selects with its own keys.
 func threeRows() []Row {
 	return []Row{
-		{Path: "/cache/a", Bytes: 300, Source: SrcAuto, Category: "caches"},
-		{Path: "/cache/b", Bytes: 200, Source: SrcAuto, Category: "caches"},
-		{Path: "/cache/c", Bytes: 100, Source: SrcAuto, Category: "caches"},
+		{Path: "/cache/a", Bytes: 300, Source: SrcOptionalOn, Category: "caches"},
+		{Path: "/cache/b", Bytes: 200, Source: SrcOptionalOn, Category: "caches"},
+		{Path: "/cache/c", Bytes: 100, Source: SrcOptionalOn, Category: "caches"},
 	}
 }
 
@@ -313,7 +314,7 @@ func TestPathKeptByAGuardIsReported(t *testing.T) {
 	ft.keys(" ")
 	ft.special(term.KeyDown)
 	ft.keys(" dy")
-	ft.waitFor(t, "Kept by a guard (1)")
+	ft.waitFor(t, "Protected by a guard (1)")
 	ft.waitFor(t, "/cache/b")
 	if !strings.Contains(ft.screen(), "open") || strings.Contains(ft.screen(), "error:") {
 		t.Fatalf("screen:\n%s", ft.screen())
