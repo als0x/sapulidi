@@ -29,16 +29,16 @@ func placesSummary() SummaryData {
 
 func placesRows() []Row {
 	return []Row{
-		{Path: "/home/user/.nvm/versions/node/v16.20.2", Bytes: 500_000_000, Created: day(2025, 1, 1), Updated: day(2026, 1, 1), Source: SrcAuto, Category: "node", RuleKey: "node/nvm@1"},
-		{Path: "/home/user/.nvm/versions/node/v18.0.0", Bytes: 300_000_000, Created: day(2025, 2, 1), Updated: day(2026, 2, 1), Source: SrcAuto, Category: "node", RuleKey: "node/nvm@1"},
+		{Path: "/home/user/.nvm/versions/node/v16.20.2", Bytes: 500_000_000, Created: day(2025, 1, 1), Updated: day(2026, 1, 1), Source: SrcAuto, Label: core.LabelSafe, Category: "node", RuleKey: "node/nvm@1"},
+		{Path: "/home/user/.nvm/versions/node/v18.0.0", Bytes: 300_000_000, Created: day(2025, 2, 1), Updated: day(2026, 2, 1), Source: SrcAuto, Label: core.LabelSafe, Category: "node", RuleKey: "node/nvm@1"},
 		{Path: "/home/user/.nvm/versions/node/v24.22.1", Bytes: -1, Updated: day(2026, 11, 20), Source: SrcKept, Guard: "active", Category: "node", RuleKey: "node/nvm@1"},
 		{Path: "/home/user/proj/node_modules", Bytes: 1_200_000_000, Created: day(2026, 3, 2), Updated: day(2026, 11, 1), Source: SrcOptionalOn, Label: core.LabelRecommended, Category: "node", RuleKey: "node/nm@1"},
-		{Path: "/home/user/proj/target", Bytes: 700_000_000, Updated: day(2026, 9, 9), Source: SrcExcluded, Base: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
+		{Path: "/home/user/proj/target", Bytes: 700_000_000, Updated: day(2026, 9, 9), Source: SrcExcluded, Base: SrcAuto, Label: core.LabelSafe, Category: "rust", RuleKey: "rust/target@1"},
 		{Path: "/home/user/proj/.worktrees/a1", Bytes: -1, Updated: day(2026, 11, 21), Source: SrcKept, Guard: "dirty", Category: "git", RuleKey: "git/wt@1"},
 		{Path: "/home/user/old/node_modules", Bytes: 800_000_000, Created: day(2024, 5, 1), Updated: day(2025, 2, 3), Source: SrcOptionalOff, Category: "node", RuleKey: "node/nm@1"},
 		{Path: "/home/user/keptonly/.venv", Bytes: -1, Updated: day(2026, 11, 20), Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1"},
-		{Path: "/home/user/ex/target", Bytes: 5_000_000, Source: SrcExcluded, Base: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
-		{Path: "docker system prune", Bytes: 50_000_000, Source: SrcAuto, Category: "docker", RuleKey: "docker/prune@1", Block: containersReason},
+		{Path: "/home/user/ex/target", Bytes: 5_000_000, Source: SrcExcluded, Base: SrcAuto, Label: core.LabelSafe, Category: "rust", RuleKey: "rust/target@1"},
+		{Path: "docker system prune", Bytes: 50_000_000, Source: SrcAuto, Label: core.LabelSafe, Category: "docker", RuleKey: "docker/prune@1", Block: containersReason},
 	}
 }
 
@@ -192,8 +192,8 @@ func scratchRows() []Row {
 		})
 	}
 	rows = append(rows,
-		Row{Path: "/private/tmp/claude-1000/-Users-x-old/s9", Bytes: 4_000_000, Updated: day(2026, 1, 2), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
-		Row{Path: "/private/tmp/claude-1000/-Users-y-old/s8", Bytes: 1_000_000, Updated: day(2026, 1, 3), Source: SrcAuto, Category: "agent", RuleKey: "agent/scratch@1"},
+		Row{Path: "/private/tmp/claude-1000/-Users-x-old/s9", Bytes: 4_000_000, Updated: day(2026, 1, 2), Source: SrcAuto, Label: core.LabelSafe, Category: "agent", RuleKey: "agent/scratch@1"},
+		Row{Path: "/private/tmp/claude-1000/-Users-y-old/s8", Bytes: 1_000_000, Updated: day(2026, 1, 3), Source: SrcAuto, Label: core.LabelSafe, Category: "agent", RuleKey: "agent/scratch@1"},
 	)
 	return rows
 }
@@ -333,15 +333,15 @@ func TestSpaceOnAPlaceSelectsReadyRowsOnly(t *testing.T) {
 	}
 }
 
-func TestAOnPlacesTogglesReadyRowsOfThePlacesInView(t *testing.T) {
+func TestAOnPlacesSelectsReadyRowsOfThePlacesInView(t *testing.T) {
 	m, _ := keys(placesModel(), "a")
 	want := map[string]bool{"/home/user/proj/node_modules": true, "/home/user/.nvm/versions/node/v16.20.2": true, "/home/user/.nvm/versions/node/v18.0.0": true}
 	if !reflect.DeepEqual(m.Selected, want) {
 		t.Fatalf("selected %v", m.Selected)
 	}
 	m, _ = keys(m, "a")
-	if len(m.Selected) != 0 {
-		t.Fatalf("a again must deselect: %v", m.Selected)
+	if !reflect.DeepEqual(m.Selected, want) {
+		t.Fatalf("a again must not deselect: %v", m.Selected)
 	}
 	f, _ := keys(placesModel(), "/nvm<enter>a")
 	if len(f.Selected) != 2 {
@@ -573,7 +573,7 @@ func TestConfirmSaysWhenRowsAreNotInTheListYouCameFrom(t *testing.T) {
 func manyRows(n int) []Row {
 	var rows []Row
 	for i := range n {
-		rows = append(rows, Row{Path: fmt.Sprintf("/s/p%02d", i), Bytes: 100, Source: SrcAuto, Category: "misc", RuleKey: "misc/x@1"})
+		rows = append(rows, Row{Path: fmt.Sprintf("/s/p%02d", i), Bytes: 100, Source: SrcAuto, Label: core.LabelSafe, Category: "misc", RuleKey: "misc/x@1"})
 	}
 	return rows
 }
@@ -651,7 +651,7 @@ func TestExclusionDuringDeleteKeepsThePlacesCursor(t *testing.T) {
 	}
 	// the last place, with many flat rows before it: the cursor must stay a place index
 	many := manyRows(30)
-	m = scanned(append(many, Row{Path: "/zz/last", Bytes: 1, Source: SrcAuto}), placesSummary())
+	m = scanned(append(many, Row{Path: "/zz/last", Bytes: 1, Source: SrcAuto, Label: core.LabelSafe}), placesSummary())
 	m, _ = keys(m, "jdy")
 	m, _ = Update(m, ExclusionChangedMsg{Path: "/s/p03", Excluded: true})
 	if m.Cursor >= len(m.places()) {
@@ -665,7 +665,7 @@ func TestAInAPlaceSelectsReadyRowsOnly(t *testing.T) {
 		t.Fatalf("optional-only place: %v %q", m.Selected, m.Status)
 	}
 	rows := []Row{
-		{Path: "/home/user/mix/a", Bytes: 10, Source: SrcAuto},
+		{Path: "/home/user/mix/a", Bytes: 10, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "/home/user/mix/b", Bytes: 20, Source: SrcOptionalOn, Label: core.LabelRecommended},
 		{Path: "/home/user/mix/c", Bytes: 30, Source: SrcOptionalOff},
 		{Path: "/home/user/mix/d", Bytes: 40, Source: SrcOptionalOn, Label: core.LabelYourCall},

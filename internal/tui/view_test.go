@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 // Regenerate the golden screens with: go test ./internal/tui -update
@@ -184,7 +186,7 @@ func TestViewNeverExceedsTheWindow(t *testing.T) {
 		models[c.name] = c.model()
 	}
 	long := listModel()
-	long.Rows = append(long.Rows, Row{Path: "/" + strings.Repeat("deep/", 60) + "x", Bytes: 1, Source: SrcAuto, Members: []string{"docker:" + strings.Repeat("c", 120)}})
+	long.Rows = append(long.Rows, Row{Path: "/" + strings.Repeat("deep/", 60) + "x", Bytes: 1, Source: SrcAuto, Label: core.LabelSafe, Members: []string{"docker:" + strings.Repeat("c", 120)}})
 	models["long"] = long
 	models["long_detail"], _ = keys(long, "<enter>")
 	for name, m := range models {

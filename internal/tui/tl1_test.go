@@ -171,7 +171,10 @@ func TestLabelOfARow(t *testing.T) {
 		row  Row
 		want core.Label
 	}{
-		{Row{Source: SrcAuto}, core.LabelSafe},
+		{Row{Source: SrcAuto, Label: core.LabelSafe}, core.LabelSafe},
+		{Row{Source: SrcAuto}, core.LabelYourCall},
+		{Row{Source: SrcAuto, Label: core.LabelProtected}, core.LabelYourCall},
+		{Row{Source: SrcAuto, Label: "bogus"}, core.LabelYourCall},
 		{Row{Source: SrcOptionalOn}, core.LabelYourCall},
 		{Row{Source: SrcOptionalOn, Label: core.LabelRecommended}, core.LabelRecommended},
 		{Row{Source: SrcOptionalOff, Label: core.LabelRecommended}, core.LabelYourCall},
@@ -304,6 +307,38 @@ func TestSpaceOnAYourCallPlaceAsks(t *testing.T) {
 	m, _ = keys(m, "y")
 	if !m.Selected["/home/user/.codex/sessions/2025"] {
 		t.Fatal("y did not select")
+	}
+}
+
+func TestOnlyAnExactSafeOrRecommendedLabelIsSelected(t *testing.T) {
+	want := []string{"/h/optional-safe"}
+	start, _ := Update(NewModel(true), ScanDoneMsg{Rows: hostileRows(), Summary: placesSummary()})
+	if got := selectedPaths(start); !slices.Equal(got, want) {
+		t.Fatalf("preselected %v, want %v", got, want)
+	}
+	for _, script := range []string{"a", " ", "<enter>a", "ca", "coa"} {
+		m, _ := keys(scanned(hostileRows(), placesSummary()), script)
+		if got := selectedPaths(m); !slices.Equal(got, want) {
+			t.Errorf("%q selected %v, want %v", script, got, want)
+		}
+	}
+}
+
+func TestANeverDeselects(t *testing.T) {
+	for _, script := range []string{"a", "aa", "<enter>a", "ca", "caa"} {
+		if m, _ := keys(labelModel(), script); !slices.Equal(selectedPaths(m), wantPreselected) {
+			t.Errorf("%q after the start: %v", script, selectedPaths(m))
+		}
+	}
+	// a your call row picked by hand stays through `a`
+	m, _ := keys(onPlace(t, labelModel(), "Codex · sessions"), " ya")
+	if !m.Selected["/home/user/.codex/sessions/2025"] || len(selectedPaths(m)) != len(wantPreselected)+1 {
+		t.Errorf("selected %v", selectedPaths(m))
+	}
+	// space still clears
+	cleared, _ := keys(onPlace(t, labelModel(), "Codex · tmp"), " ")
+	if cleared.Selected["/home/user/.codex/.tmp/x"] {
+		t.Error("space did not deselect")
 	}
 }
 

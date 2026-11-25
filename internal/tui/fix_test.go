@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 // checkLine fails when a line holds a control character or is wider than w terminal columns. Nothing is stripped
@@ -213,7 +215,7 @@ func TestGroupDeleteDone(t *testing.T) {
 
 func TestHostileTextIsSanitisedAndCountedInColumns(t *testing.T) {
 	evil := "/日本語/x\t\x1b[2J\n\u0085end"
-	rows := append(fixtureRows(), Row{Path: evil, Bytes: 5, Source: SrcAuto, Category: "c\x1b[31m", RuleKey: "r\tk", Why: "why\x1b]0;x\x07",
+	rows := append(fixtureRows(), Row{Path: evil, Bytes: 5, Source: SrcAuto, Label: core.LabelSafe, Category: "c\x1b[31m", RuleKey: "r\tk", Why: "why\x1b]0;x\x07",
 		Guards: []string{"g\x1b[2J"}, Children: []Child{{"日本語\x1b[2J", 1}}, Members: []string{"docker:\x1b[2Jid\n"}})
 	rows[0].Block = "blocked\x1b[2J"
 	for _, plain := range []bool{true, false} {
@@ -376,18 +378,20 @@ func randomRows(rng *rand.Rand) []Row {
 	if rng.Intn(3) == 0 {
 		rows[rng.Intn(len(rows))].Bytes = -1
 	}
-	return rows
+	return append(rows, hostileRows()...)
 }
+
+func startRows() []Row { return append(fixtureRows(), hostileRows()...) }
 
 func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 	alphabet := []string{"j", "k", " ", "a", "x", "s", "o", "/", "d", "y", "n", "q", "e", "g", "<esc>", "<enter>", "<up>", "<down>", "<bs>", "c", "c", "?", "u", "?", "u"}
 	sizes := []ResizeMsg{{70, 20}, {80, 24}, {120, 40}, {80, 300}}
 	for seq := range 400 {
 		rng := rand.New(rand.NewSource(int64(seq)))
-		m, _ := Update(NewModel(true), ScanDoneMsg{Rows: fixtureRows(), Summary: fixtureSummary()}) // starts on the places
+		m, _ := Update(NewModel(true), ScanDoneMsg{Rows: startRows(), Summary: fixtureSummary()}) // starts on the places
 		m, _ = Update(m, UncoveredMsg{Unknown: unknownSummary().Unknown})
 		want := map[string]bool{} // the selection, tracked by rules of its own
-		for _, r := range fixtureRows() {
+		for _, r := range startRows() {
 			if isReady(r) {
 				want[r.Path] = true // the start state: safe and recommended rows are selected
 			}
@@ -408,7 +412,7 @@ func TestPropertyDeleteEqualsIndependentOracle(t *testing.T) {
 			case r == 1:
 				msg = ScanDoneMsg{Rows: randomRows(rng), Summary: fixtureSummary()}
 			case r == 2 || r == 3:
-				all := fixtureRows()
+				all := startRows()
 				p := all[rng.Intn(len(all))].Path
 				if rng.Intn(4) == 0 {
 					p = "docker:abc123"

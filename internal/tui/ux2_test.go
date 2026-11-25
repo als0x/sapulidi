@@ -4,12 +4,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 // mixedModel is the places fixture plus one place with a ready row and an optional row.
 func mixedModel() Model {
 	rows := append(placesRows(),
-		Row{Path: "/home/user/mix/a", Bytes: 100_000_000, Source: SrcAuto, Category: "node", RuleKey: "node/nm@1"},
+		Row{Path: "/home/user/mix/a", Bytes: 100_000_000, Source: SrcAuto, Label: core.LabelSafe, Category: "node", RuleKey: "node/nm@1"},
 		Row{Path: "/home/user/mix/b", Bytes: 300_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/nm@1"},
 	)
 	return scanned(rows, placesSummary())

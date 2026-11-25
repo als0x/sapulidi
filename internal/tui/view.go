@@ -284,15 +284,15 @@ func footerOf(m Model) string {
 	}
 	switch m.Screen {
 	case ScreenPlaces:
-		return join("enter open", "space select", "d delete", "g protected", "c view", "? help", "q quit")
+		return join("enter open", "space toggle", "d delete", "g protected", "c view", "? help", "q quit")
 	case ScreenPlace:
-		return join("esc back", "enter detail", "space select", "x exclude", "d delete", "? help", "q quit")
+		return join("esc back", "enter detail", "space toggle", "x exclude", "d delete", "? help", "q quit")
 	case ScreenHelp:
 		return join("up/down scroll", "esc or ? close", "q quit")
 	case ScreenUnknown:
 		return join("up/down scroll", "esc back", "? help", "q quit")
 	}
-	return join("enter detail", "space select", "d delete", "o off rows", "c view", "? help", "q quit")
+	return join("enter detail", "space toggle", "d delete", "o off rows", "c view", "? help", "q quit")
 }
 
 // topPanels draws the summary at the full width of the window.
@@ -431,7 +431,7 @@ func viewDetail(m Model, w, h int) []string {
 		}
 		lines = append(lines, "  "+fitRight(fmtBytes(c.Bytes), 9)+"  "+shorten(c.Name, w-13))
 	}
-	footer := "esc: back  space: select  x: exclude  d: delete"
+	footer := "esc: back  space: toggle  x: exclude  d: delete"
 	if m.Status != "" {
 		footer = m.Status
 	}

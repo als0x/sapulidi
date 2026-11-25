@@ -706,9 +706,9 @@ func TestTerminalReadErrorEndsRun(t *testing.T) {
 func TestExclusionOfANonPathIsRefused(t *testing.T) {
 	ft, d := newFakes()
 	d.rows = append(d.rows,
-		Row{Path: "docker builder prune -f", Bytes: -1, Source: SrcAuto, Block: containersReason},
-		Row{Path: "/cache/star*", Bytes: 1, Source: SrcAuto},
-		Row{Path: "relative/dir", Bytes: 1, Source: SrcAuto})
+		Row{Path: "docker builder prune -f", Bytes: -1, Source: SrcAuto, Label: core.LabelSafe, Block: containersReason},
+		Row{Path: "/cache/star*", Bytes: 1, Source: SrcAuto, Label: core.LabelSafe},
+		Row{Path: "relative/dir", Bytes: 1, Source: SrcAuto, Label: core.LabelSafe})
 	done := start(d)
 	ft.waitFor(t, "enter to look inside")
 	ft.keys("c")

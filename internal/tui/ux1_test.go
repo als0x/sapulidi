@@ -49,11 +49,11 @@ func TestHeadline(t *testing.T) {
 	}{
 		{"real machine", realMachineRows(), "Free now: 0 B safe | 0 B recommended | 1.2 GB your call | 155 protected"},
 		{"every label", []Row{
-			{Path: "/a/x", Bytes: gib, Source: SrcAuto}, {Path: "/a/y", Bytes: gib, Source: SrcOptionalOn, Label: core.LabelRecommended},
+			{Path: "/a/x", Bytes: gib, Source: SrcAuto, Label: core.LabelSafe}, {Path: "/a/y", Bytes: gib, Source: SrcOptionalOn, Label: core.LabelRecommended},
 			{Path: "/b/z", Bytes: gib / 2, Source: SrcOptionalOff},
 		}, "1.0 GB safe | 1.0 GB rec. | 512.0 MB your call | 0 kept"},
 		{"unknown sizes", []Row{
-			{Path: "/a/x", Bytes: gib, Source: SrcAuto}, {Path: "/a/y", Bytes: -1, Source: SrcAuto},
+			{Path: "/a/x", Bytes: gib, Source: SrcAuto, Label: core.LabelSafe}, {Path: "/a/y", Bytes: -1, Source: SrcAuto, Label: core.LabelSafe},
 			{Path: "/b/z", Bytes: -1, Source: SrcOptionalOff},
 		}, "Free now: 1.0 GB+ safe | 0 B recommended | 0 B+ your call | 0 protected"},
 		{"nothing", nil, "Free now: 0 B safe | 0 B recommended | 0 B your call | 0 protected"},
@@ -77,7 +77,7 @@ func TestEmptyReadyMessageExactlyWhenNothingReadyAndSomethingOptional(t *testing
 			t.Errorf("message part %q missing at 80x24:\n%s", part, got)
 		}
 	}
-	ready := append(realMachineRows(), Row{Path: "/home/user/r/go", Bytes: gib, Source: SrcAuto})
+	ready := append(realMachineRows(), Row{Path: "/home/user/r/go", Bytes: gib, Source: SrcAuto, Label: core.LabelSafe})
 	if got := screen(modelOf(ready, placesSummary())); strings.Contains(got, "nothing is safe or recommended") {
 		t.Errorf("a ready row exists:\n%s", got)
 	}
@@ -527,7 +527,7 @@ func TestHelpClaimsMatchTheKeys(t *testing.T) {
 	}
 	for _, claim := range []string{
 		"select the safe and recommended rows in view, never your call",
-		"on the places, a clears them when all are selected",
+		"a never deselects, space does",
 		"At start every safe and recommended row is selected.",
 		"flat list: show or hide the rows of switched off categories",
 		"exclude the row under the cursor (flat list, inside a place)",

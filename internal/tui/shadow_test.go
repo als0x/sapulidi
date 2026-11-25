@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/als0x/sapulidi/internal/core"
 )
 
 // The helpers below track the selection with rules written from the spec, never from Model.selected(): the property
@@ -14,9 +16,25 @@ func isSel(r Row) bool {
 	return r.Block == "" && (r.Source == "auto" || r.Source == "optional-on" || r.Source == "optional-off")
 }
 
-// isReady is a safe or recommended row: an auto row, or a recommended one whose category is not switched off.
+// isReady is a selectable row whose label is exactly safe or recommended and whose category is not switched off.
 func isReady(r Row) bool {
-	return r.Block == "" && (r.Source == "auto" || r.Source == "optional-on" && r.Label == "recommended")
+	return r.Block == "" && (r.Source == "auto" || r.Source == "optional-on") &&
+		(r.Label == "safe" || r.Label == "recommended")
+}
+
+// hostileRows are rows whose label and source disagree, or whose label nobody knows.
+func hostileRows() []Row {
+	row := func(path, src string, l core.Label) Row {
+		return Row{Path: path, Bytes: 1000, Source: src, Label: l, Category: "misc", RuleKey: "misc/h@1"}
+	}
+	return []Row{
+		row("/h/auto-your-call", SrcAuto, core.LabelYourCall),
+		row("/h/auto-protected", SrcAuto, core.LabelProtected),
+		row("/h/optional-safe", SrcOptionalOn, core.LabelSafe),
+		row("/h/auto-unknown", SrcAuto, "bogus"),
+		row("/h/auto-no-label", SrcAuto, ""),
+		row("/h/off-safe", SrcOptionalOff, core.LabelSafe),
+	}
 }
 
 // shadowKey applies a key press to want. prev is the model before the key; it only says what the key targets
@@ -121,7 +139,13 @@ func shadowKey(want map[string]bool, sp *string, prev Model, key string) {
 				ready = append(ready, r.Path)
 			}
 		}
-		toggle(ready)
+		if key == " " {
+			toggle(ready)
+			return
+		}
+		for _, p := range ready { // `a` only selects
+			want[p] = true
+		}
 	case ScreenList:
 		if key == " " {
 			cursorRow()

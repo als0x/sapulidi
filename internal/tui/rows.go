@@ -28,7 +28,7 @@ type Row struct {
 	Origin   string // the source at scan time; restored when an exclusion is removed ("" = unknown)
 	Category string
 	RuleKey  string
-	Label    core.Label // the engine's label of the rule; "" is derived from Source (see label)
+	Label    core.Label // the engine's label of the rule (see label)
 	Location string     // the location of the rule; the rules of agents are placed by it
 	Place    string     // the place the row is listed under, set when the scan arrives
 	Why      string     // why it is a candidate
@@ -77,17 +77,14 @@ func (r Row) selectable() bool {
 }
 
 // label is the label shown for the row. A kept or excluded row is protected. A row of a category the user switched
-// off is "your call": it is listed, never preselected, and the schedule never removes it.
+// off is "your call": it is listed, never preselected, and the schedule never removes it. Any other row is safe or
+// recommended only when its label says exactly that; everything else is "your call".
 func (r Row) label() core.Label {
 	switch {
 	case r.Source == SrcKept || r.Source == SrcExcluded:
 		return core.LabelProtected
-	case r.Source == SrcOptionalOff:
-		return core.LabelYourCall
-	case r.Label != "":
+	case r.Source != SrcOptionalOff && (r.Label == core.LabelSafe || r.Label == core.LabelRecommended):
 		return r.Label
-	case r.Source == SrcAuto:
-		return core.LabelSafe
 	}
 	return core.LabelYourCall
 }

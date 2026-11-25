@@ -21,4 +21,4 @@
 
 
 paused: run sapulidi resume
-enter detail | space select | d delete | o off rows | c view | ? help | q quit
+enter detail | space toggle | d delete | o off rows | c view | ? help | q quit

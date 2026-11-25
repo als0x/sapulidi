@@ -16,7 +16,7 @@ func day(y int, mo time.Month, d int) time.Time { return time.Date(y, mo, d, 0, 
 func fixtureRows() []Row {
 	return []Row{
 		{Path: "/home/user/.cache/go-build", Bytes: 3_100_000_000, Created: day(2025, 1, 10), Updated: day(2026, 11, 1),
-			Source: SrcAuto, Category: "go", RuleKey: "go/go-build@1", Why: "Go build cache not used for 20 days",
+			Source: SrcAuto, Label: core.LabelSafe, Category: "go", RuleKey: "go/go-build@1", Why: "Go build cache not used for 20 days",
 			Guards:   []string{"deny: not on the deny list", "fresh: newest change 23 days ago, minimum 14"},
 			Children: []Child{{"3a", 900_000_000}, {"7f", 400_000_000}}},
 		{Path: "/home/user/proj/node_modules", Bytes: 1_200_000_000, Created: day(2026, 3, 2), Updated: day(2026, 6, 30),
@@ -24,16 +24,16 @@ func fixtureRows() []Row {
 		{Path: "/home/user/old/node_modules", Bytes: 800_000_000, Created: day(2024, 5, 1), Updated: day(2025, 2, 3),
 			Source: SrcOptionalOff, Category: "node", RuleKey: "node/node-modules@1", Why: "dependencies of a project idle for 400 days"},
 		{Path: "/home/user/.npm/_cacache", Bytes: 500_000_000, Created: day(2025, 8, 8), Updated: day(2026, 11, 20),
-			Source: SrcAuto, Category: "node", RuleKey: "node/npm-cache@1", Block: WholesaleReason("npm cache clean")},
+			Source: SrcAuto, Label: core.LabelSafe, Category: "node", RuleKey: "node/npm-cache@1", Block: WholesaleReason("npm cache clean")},
 		{Path: "/home/user/proj2/target", Bytes: 700_000_000, Created: day(2026, 1, 1), Updated: day(2026, 9, 9),
-			Source: SrcExcluded, Base: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
+			Source: SrcExcluded, Base: SrcAuto, Label: core.LabelSafe, Category: "rust", RuleKey: "rust/target@1"},
 		{Path: "/home/user/work/repo/.venv", Bytes: 90_000_000, Created: day(2026, 2, 2), Updated: day(2026, 11, 20),
 			Source: SrcKept, Guard: "dirty", Category: "python", RuleKey: "python/venv@1", Block: "kept by a guard: git repository with uncommitted work"},
 		{Path: "/home/user/containers/stopped", Bytes: 60_000_000, Created: day(2026, 10, 1), Updated: day(2026, 10, 2),
 			Source: SrcOptionalOn, Category: "docker", RuleKey: "docker/stopped@1", Members: []string{"docker:abc123", "docker:def456"}},
 		{Path: "/home/user/a/very/long/directory/name/that/does/not/fit/in/the/path/column/of/the/list/target", Bytes: 20_000_000,
-			Source: SrcAuto, Category: "rust", RuleKey: "rust/target@1"},
-		{Path: "/home/user/zz", Bytes: 10_000_000, Updated: day(2026, 11, 10), Source: SrcAuto, Category: "misc", RuleKey: "misc/zz@1"},
+			Source: SrcAuto, Label: core.LabelSafe, Category: "rust", RuleKey: "rust/target@1"},
+		{Path: "/home/user/zz", Bytes: 10_000_000, Updated: day(2026, 11, 10), Source: SrcAuto, Label: core.LabelSafe, Category: "misc", RuleKey: "misc/zz@1"},
 	}
 }
 
@@ -98,11 +98,11 @@ func pathsOf(rows []Row) []string {
 // fx4Rows has every kind of row the default view must sort out.
 func fx4Rows() []Row {
 	return []Row{
-		{Path: "/a/auto", Bytes: 100_000_000, Source: SrcAuto, Category: "go", RuleKey: "go/a@1"},
+		{Path: "/a/auto", Bytes: 100_000_000, Source: SrcAuto, Label: core.LabelSafe, Category: "go", RuleKey: "go/a@1"},
 		{Path: "/a/opt-on", Bytes: 90_000_000, Source: SrcOptionalOn, Label: core.LabelRecommended, Category: "node", RuleKey: "node/a@1"},
 		{Path: "/a/opt-off", Bytes: 50_000_000, Source: SrcOptionalOff, Category: "node", RuleKey: "node/a@1"},
 		{Path: "/a/opt-off-unknown", Bytes: -1, Source: SrcOptionalOff, Category: "node", RuleKey: "node/a@1"},
-		{Path: "/a/excluded", Bytes: 80_000_000, Source: SrcExcluded, Base: SrcAuto, Category: "go", RuleKey: "go/a@1"},
+		{Path: "/a/excluded", Bytes: 80_000_000, Source: SrcExcluded, Base: SrcAuto, Label: core.LabelSafe, Category: "go", RuleKey: "go/a@1"},
 		{Path: "/a/kept-dirty", Bytes: -1, Source: SrcKept, Guard: "dirty", Category: "git", RuleKey: "git/w@1"},
 		{Path: "/a/kept-odd", Bytes: -1, Source: SrcKept, Guard: "some-odd-guard-token-name", Category: "git", RuleKey: "git/w@1"},
 	}
@@ -267,10 +267,10 @@ func cursorPathOf(t *testing.T, m Model) string {
 
 func TestUnexcludeOfUnknownOriginStaysWhereItIs(t *testing.T) {
 	rows := []Row{
-		{Path: "/a", Bytes: 300, Source: SrcAuto},
+		{Path: "/a", Bytes: 300, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "/x", Bytes: 250, Source: SrcExcluded}, // no Base, no Origin: the scan gave no source
-		{Path: "/b", Bytes: 200, Source: SrcAuto},
-		{Path: "/c", Bytes: 100, Source: SrcAuto},
+		{Path: "/b", Bytes: 200, Source: SrcAuto, Label: core.LabelSafe},
+		{Path: "/c", Bytes: 100, Source: SrcAuto, Label: core.LabelSafe},
 	}
 	m := fx4Model(rows)
 	m, _ = keys(m, "j") // /a is first selectable; /x is next
@@ -302,9 +302,9 @@ func TestUnexcludeOfUnknownOriginStaysWhereItIs(t *testing.T) {
 
 func TestUnexcludeOfOptionalOffRowStaysUntilTheCursorLeaves(t *testing.T) {
 	rows := []Row{
-		{Path: "/a", Bytes: 300, Source: SrcAuto},
+		{Path: "/a", Bytes: 300, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "/o", Bytes: 200, Source: SrcExcluded, Base: SrcOptionalOff},
-		{Path: "/b", Bytes: 100, Source: SrcAuto},
+		{Path: "/b", Bytes: 100, Source: SrcAuto, Label: core.LabelSafe},
 	}
 	m := fx4Model(rows)
 	m, _ = keys(m, "j")
@@ -326,8 +326,8 @@ func TestUnexcludeOfOptionalOffRowStaysUntilTheCursorLeaves(t *testing.T) {
 
 func TestTogglesAndEscKeepTheCursorOnTheSameRow(t *testing.T) {
 	rows := []Row{
-		{Path: "/b", Bytes: 20, Source: SrcAuto},
-		{Path: "/c", Bytes: 10, Source: SrcAuto},
+		{Path: "/b", Bytes: 20, Source: SrcAuto, Label: core.LabelSafe},
+		{Path: "/c", Bytes: 10, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "/a", Bytes: -1, Source: SrcKept, Guard: "dirty"},
 		{Path: "/a0", Bytes: 5, Source: SrcOptionalOff},
 	}
@@ -347,7 +347,7 @@ func TestTogglesAndEscKeepTheCursorOnTheSameRow(t *testing.T) {
 
 func TestOptionalHintIgnoresRowsThatStayBlocked(t *testing.T) {
 	rows := []Row{
-		{Path: "/a", Bytes: 1, Source: SrcAuto},
+		{Path: "/a", Bytes: 1, Source: SrcAuto, Label: core.LabelSafe},
 		{Path: "docker prune", Bytes: 99, Source: SrcOptionalOff, Block: "never from this screen"},
 	}
 	if s := screen(fx4Model(rows)); strings.Contains(s, "switched off: ") {
@@ -358,8 +358,8 @@ func TestOptionalHintIgnoresRowsThatStayBlocked(t *testing.T) {
 func TestCursorStartsOnFirstSelectableRow(t *testing.T) {
 	rows := []Row{
 		{Path: "/a/excluded", Bytes: 900, Source: SrcExcluded, Base: SrcAuto},
-		{Path: "/a/blocked", Bytes: 800, Source: SrcAuto, Block: "cleaned by x"},
-		{Path: "/a/auto", Bytes: 100, Source: SrcAuto},
+		{Path: "/a/blocked", Bytes: 800, Source: SrcAuto, Label: core.LabelSafe, Block: "cleaned by x"},
+		{Path: "/a/auto", Bytes: 100, Source: SrcAuto, Label: core.LabelSafe},
 	}
 	m := fx4Model(rows)
 	if r, _ := m.cursorRow(); r.Path != "/a/auto" {

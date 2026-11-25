@@ -46,7 +46,7 @@ Markers: `[ ]` nothing selected, `[x]` everything you can select in the place is
 | `up` `down` | move |
 | `enter` | open a place, or a row's detail |
 | `space` | select or clear. On a place: its safe and recommended rows. A place with only your call rows asks `y`/`n` first. In a mixed place `space` leaves the your call rows, so its box stays `[~]`; open it with `enter` and pick them there |
-| `a` | select the safe and recommended rows in view, never a your call one; on the places it clears them when all are already selected |
+| `a` | select the safe and recommended rows in view, never a your call one. It only selects: to deselect, use `space` |
 | `d` | delete the selection; the confirmation scrolls with `up` `down`, `j` `k`, `PgUp` `PgDn` |
 | `x` | exclude the path for good (the same as `sapulidi exclude`) |
 | `c` | switch between the places and the flat list |

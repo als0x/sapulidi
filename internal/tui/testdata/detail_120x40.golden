@@ -37,4 +37,4 @@ largest inside
 
 
 
-esc: back  space: select  x: exclude  d: delete
+esc: back  space: toggle  x: exclude  d: delete

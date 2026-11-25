@@ -35,7 +35,7 @@ var helpText = []string{
 	"         them, n or esc not. In a mixed place pick your call rows with",
 	"         enter (the box stays [~] until you do)",
 	"  a      select the safe and recommended rows in view, never your call",
-	"         ones; on the places, a clears them when all are selected",
+	"         ones; a never deselects, space does",
 	"  o      flat list: show or hide the rows of switched off categories",
 	"         (places always list them)",
 	"  g      show or hide protected rows",

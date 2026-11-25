@@ -106,9 +106,12 @@ func (t tally) cell() string { return sizeCell(t.N, t.Bytes, t.Unknown) }
 // readyN is the number of safe and recommended rows.
 func (p place) readyN() int { return p.Safe.N + p.Rec.N }
 
-// readyRow reports a selectable row that is selected at start, and by `a` and space on a place: safe or
-// recommended.
-func readyRow(r Row) bool { return r.selectable() && r.label() != core.LabelYourCall }
+// readyRow reports a selectable row that is selected at start, and by `a` and space on a place. It is an
+// allow-list: only a row labelled safe or recommended.
+func readyRow(r Row) bool {
+	l := r.label()
+	return r.selectable() && (l == core.LabelSafe || l == core.LabelRecommended)
+}
 
 // allPlaces groups every row by place, in no particular order.
 func (m Model) allPlaces() []place {
@@ -296,7 +299,7 @@ func placesKey(m Model, k KeyMsg) (Model, []Effect) {
 	case k.Rune == '/':
 		m.Filtering = true
 	case k.Rune == 'a':
-		m = selectReadyIn(m, m.places())
+		m = selectReadyIn(m, m.places(), false)
 	case k.Rune == ' ':
 		if curOK {
 			m = spacePlace(m, cur)
@@ -367,7 +370,7 @@ func spacePlace(m Model, cur place) Model {
 		}
 		return m
 	}
-	m = selectReadyIn(m, []place{cur})
+	m = selectReadyIn(m, []place{cur}, true)
 	if n := cur.readyN(); n > 0 && m.Status == "" && m.placeReadySelected(cur.Name) {
 		switch left := m.unselectedCall(cur.Name); {
 		case left.N > 0:
@@ -432,9 +435,10 @@ func (m Model) placeReadySelected(name string) bool {
 	return true
 }
 
-// selectReadyIn toggles every safe and recommended row of the given places: when all of them are selected they are
-// deselected. "Your call" and protected rows are never touched. With nothing to toggle it only says why.
-func selectReadyIn(m Model, ps []place) Model {
+// selectReadyIn selects every safe and recommended row of the given places. With toggle (space), when all of them
+// are selected already they are deselected. "Your call" and protected rows are never touched. With nothing to
+// select it only says why.
+func selectReadyIn(m Model, ps []place, toggle bool) Model {
 	names := map[string]bool{}
 	var callOnly, keptOnly, wholeOnly bool
 	for _, p := range ps {
@@ -466,7 +470,7 @@ func selectReadyIn(m Model, ps []place) Model {
 	}
 	m.Selected = cloneSel(m.Selected)
 	for _, p := range ready {
-		if all {
+		if toggle && all {
 			delete(m.Selected, p)
 		} else {
 			m.Selected[p] = true
