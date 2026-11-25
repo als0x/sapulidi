@@ -55,3 +55,17 @@ func (s *Store) Heartbeats() map[string]Heartbeat {
 	}
 	return out
 }
+
+// InstalledBy reports whether <state>/installed-by/<route> exists as a regular file inside a non-symlink
+// installed-by directory. Any symlink or error fails closed (returns false).
+func (s *Store) InstalledBy(route string) bool {
+	if !validHost(route) {
+		return false
+	}
+	dir, err := os.Lstat(s.path("installed-by"))
+	if err != nil || dir.Mode()&os.ModeSymlink != 0 || !dir.IsDir() {
+		return false
+	}
+	fi, err := os.Lstat(s.path("installed-by", route))
+	return err == nil && fi.Mode().IsRegular()
+}
