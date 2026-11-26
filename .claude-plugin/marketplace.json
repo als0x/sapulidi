@@ -6,7 +6,7 @@
       "name": "sapulidi",
       "source": "./",
       "description": "Removes what coding agents and toolchains leave behind on macOS and Linux, safely, with nothing to install by hand.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }

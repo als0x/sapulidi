@@ -1,7 +1,7 @@
 #!/bin/sh
 # sapulidi installer: fetch the pinned binary, verify it, install it, link it. Usage: install.sh [--dry-run] [-- args]
 # The whole body is one function called on the last line, so a download cut off in the middle runs nothing.
-SAPULIDI_VERSION=0.2.0
+SAPULIDI_VERSION=0.3.0
 SAPULIDI_REPO=als0x/sapulidi
 
 main() {
